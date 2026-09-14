@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KTMEX Poka-Yoke V4.7</title>
+    <title>KTMEX Poka-Yoke V4.8</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
     <script src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
@@ -92,6 +92,7 @@
     let idCliente = ""; // Guardará ID Cliente (Columna I)
     
     let paused = false; 
+    let isScanningActive = false;
     let track = null;
     let t_ok = ""; 
     let retryCount = 0; 
@@ -154,7 +155,7 @@
         navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}}).then(s => {
             track = s.getVideoTracks()[0];
             document.getElementById('webcam').srcObject = s; 
-            scanLoop();
+            resumeScanning();
         });
     }
 
@@ -189,50 +190,69 @@
         paused = false;
         document.getElementById('btn-res').style.display = 'none';
         document.getElementById('res-val').innerText = "---";
-        requestAnimationFrame(scanLoop);
+        if (!isScanningActive) {
+            scanLoop();
+        }
     }
 
     function triggerLock(msg) {
+        paused = true;
         logToDB("NG", msg);
         document.getElementById('lock-msg').innerText = msg;
         document.getElementById('lock').style.display = 'flex';
     }
 
     async function scanLoop() {
-        if(paused || step > 3) return;
+        if(paused || step > 3) {
+            isScanningActive = false;
+            return;
+        }
 
+        isScanningActive = true;
         const videoElem = document.getElementById('webcam');
 
         // Escaneo mediante Código QR para Paso 1 y Paso 2
         if (step === 1 || step === 2) {
             try {
                 const result = await codeReader.decodeFromVideoElement(videoElem);
-                if (result) {
+                if (result && !paused) {
                     processFound(result.getText());
+                    isScanningActive = false;
                     return;
                 }
             } catch (err) {
-                // Continuar intentando si no se detecta código QR
+                // Sin detección en el cuadro actual
             }
         } else if (step === 3) {
             // Paso 3 mediante OCR de Tesseract
-            const c = document.createElement('canvas'); c.width = 400; c.height = 300;
-            c.getContext('2d').drawImage(videoElem, 0, 0, 400, 300);
-            const { data: { text } } = await Tesseract.recognize(c, 'eng');
-            const raw = text.toUpperCase().split(/[\s\n]+/);
-            
-            let fm = null;
-            for (let w of raw) {
-                const p = w.replace(/[^A-Z0-9]/g, '');
-                if (p.match(/^M\d{3,4}$/)) fm = p;
-            }
-            if (fm) {
-                processFound(fm);
-                return;
+            try {
+                const c = document.createElement('canvas'); 
+                c.width = 400; 
+                c.height = 300;
+                c.getContext('2d').drawImage(videoElem, 0, 0, 400, 300);
+                const { data: { text } } = await Tesseract.recognize(c, 'eng');
+                const raw = text.toUpperCase().split(/[\s\n]+/);
+                
+                let fm = null;
+                for (let w of raw) {
+                    const p = w.replace(/[^A-Z0-9]/g, '');
+                    if (p.match(/^M\d{3,4}$/)) fm = p;
+                }
+                if (fm && !paused) {
+                    processFound(fm);
+                    isScanningActive = false;
+                    return;
+                }
+            } catch (e) {
+                console.error("Error OCR", e);
             }
         }
 
-        if(!paused) requestAnimationFrame(scanLoop);
+        if(!paused && step <= 3) {
+            setTimeout(scanLoop, 200);
+        } else {
+            isScanningActive = false;
+        }
     }
 
     async function processFound(val) {
@@ -316,17 +336,18 @@
             initStep4(pendingData || {});
             return;
         }
-        step++; paused = false;
+        step++; 
         document.getElementById('btn-res').style.display = 'none';
         document.getElementById('res-val').innerText = "---";
         const t = document.getElementById('step-txt');
         if(step === 2) t.innerText = "PASO 2: KANBAN";
         if(step === 3) t.innerText = "PASO 3: ID CLIENTE";
-        scanLoop();
+        resumeScanning();
     };
 
     function initStep4(data) {
         step = 4;
+        paused = true;
         document.getElementById('step-txt').innerText = "PASO 4: TEKIN VISUAL";
         document.getElementById('controls-standard').style.display = 'none';
         document.getElementById('step4-container').style.display = 'block';
@@ -363,7 +384,12 @@
     }
 
     window.resetToStepOne = () => {
-        step = 1; jamaita = ""; kanbanParte = ""; idCliente = ""; paused = false; retryCount = 0; pendingData = null;
+        step = 1; 
+        jamaita = ""; 
+        kanbanParte = ""; 
+        idCliente = ""; 
+        retryCount = 0; 
+        pendingData = null;
         document.getElementById('step4-container').style.display = 'none';
         document.getElementById('controls-standard').style.display = 'block';
         document.getElementById('btn-finish').style.display = 'none';
@@ -371,7 +397,7 @@
         document.getElementById('retry-counter').innerText = "Intentos de error: 0/5";
         document.getElementById('step-txt').innerText = "PASO 1: JAMAITA";
         document.getElementById('res-val').innerText = "---";
-        scanLoop();
+        resumeScanning();
     };
 
     window.unlock = async () => {
