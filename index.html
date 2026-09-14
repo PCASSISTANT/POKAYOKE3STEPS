@@ -8,7 +8,7 @@
     <script src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #000; color: white; overflow: hidden; }
-        video { width: 100%; height: 40%; object-fit: cover; }
+        video { width: 100%; height: 40%; object-fit: cover; background: #111; }
         .panel { position: fixed; bottom: 0; width: 100%; height: 60%; background: white; color: #333; border-radius: 25px 25px 0 0; padding: 20px; box-sizing: border-box; overflow-y: auto; }
         .btn-main { background: #1a1c2c; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; }
         .btn-flash { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: white; border: 1px solid white; padding: 12px; border-radius: 50%; z-index: 100; font-size: 20px; }
@@ -24,7 +24,7 @@
 <body>
 
 <button class="btn-flash" onclick="toggleFlash()">🔦</button>
-<video id="webcam" autoplay playsinline></video>
+<video id="webcam" autoplay playsinline muted></video>
 
 <div class="panel">
     <div id="ui-login">
@@ -82,14 +82,13 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // URL para consultar la base de datos de Google Sheets en formato CSV
     const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1GkWY2r-kz_wfv_-LPEeFEdKe1qNILTV86pln2xg_rIM/gviz/tq?tqx=out:csv";
 
     let user = null; 
     let step = 1; 
-    let jamaita = ""; // Guardará Sebango (Columna H)
-    let kanbanParte = ""; // Guardará Número de Parte (Columna J)
-    let idCliente = ""; // Guardará ID Cliente (Columna I)
+    let jamaita = ""; 
+    let kanbanParte = ""; 
+    let idCliente = ""; 
     
     let paused = false; 
     let isScanningActive = false;
@@ -100,7 +99,6 @@
     let codeReader = null;
     let sheetData = [];
 
-    // Cargar datos de Google Sheets
     async function loadSheetData() {
         try {
             const response = await fetch(SHEET_CSV_URL);
@@ -152,9 +150,11 @@
         loadSheetData();
 
         codeReader = new ZXing.BrowserMultiFormatReader();
-        navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}}).then(s => {
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(s => {
             track = s.getVideoTracks()[0];
-            document.getElementById('webcam').srcObject = s; 
+            const videoElem = document.getElementById('webcam');
+            videoElem.srcObject = s;
+            videoElem.play();
             resumeScanning();
         });
     }
@@ -190,9 +190,13 @@
         paused = false;
         document.getElementById('btn-res').style.display = 'none';
         document.getElementById('res-val').innerText = "---";
-        if (!isScanningActive) {
-            scanLoop();
+        
+        if (codeReader) {
+            try { codeReader.reset(); } catch(e) {}
         }
+        
+        isScanningActive = false;
+        setTimeout(scanLoop, 100);
     }
 
     function triggerLock(msg) {
@@ -203,15 +207,13 @@
     }
 
     async function scanLoop() {
-        if(paused || step > 3) {
-            isScanningActive = false;
+        if(paused || step > 3 || isScanningActive) {
             return;
         }
 
         isScanningActive = true;
         const videoElem = document.getElementById('webcam');
 
-        // Escaneo mediante Código QR para Paso 1 y Paso 2
         if (step === 1 || step === 2) {
             try {
                 const result = await codeReader.decodeFromVideoElement(videoElem);
@@ -221,10 +223,9 @@
                     return;
                 }
             } catch (err) {
-                // Sin detección en el cuadro actual
+                // Cuadro sin código detectado
             }
         } else if (step === 3) {
-            // Paso 3 mediante OCR de Tesseract
             try {
                 const c = document.createElement('canvas'); 
                 c.width = 400; 
@@ -248,10 +249,9 @@
             }
         }
 
+        isScanningActive = false;
         if(!paused && step <= 3) {
-            setTimeout(scanLoop, 200);
-        } else {
-            isScanningActive = false;
+            setTimeout(scanLoop, 250);
         }
     }
 
@@ -259,11 +259,9 @@
         paused = true;
         
         if (step === 1) {
-            // Paso 1: Escaneo QR -> Sebango interno (Columna H)
             jamaita = val.trim();
             document.getElementById('res-val').innerText = jamaita;
 
-            // Verificar si existe el Sebango en la columna H (Índice 7)
             const matchH = sheetData.some(row => row[7] && row[7].trim() === jamaita);
             if (matchH) {
                 document.getElementById('btn-res').style.display = 'block';
@@ -278,12 +276,10 @@
                 }
             }
         } else if (step === 2) {
-            // Paso 2: Escaneo QR -> Extracción de Número de Parte de la cadena estilo "1000-48514-AK010"
             const parsedPart = val.includes('-') ? val.substring(val.indexOf('-') + 1).trim() : val.trim();
             kanbanParte = parsedPart;
             document.getElementById('res-val').innerText = kanbanParte;
 
-            // Comparar si existen filas donde coincida el Sebango (Col H / Ind 7) y el Número de Parte (Col J / Ind 9)
             const matchHJ = sheetData.some(row => 
                 row[7] && row[7].trim() === jamaita && 
                 row[9] && row[9].trim() === kanbanParte
@@ -302,11 +298,9 @@
                 }
             }
         } else if (step === 3) {
-            // Paso 3: ID Cliente (Columna I)
             idCliente = val.trim();
             document.getElementById('res-val').innerText = idCliente;
 
-            // Comparar coincidencia completa de las 3 columnas: Col H (Ind 7), Col J (Ind 9) y Col I (Ind 8)
             const validRow = sheetData.find(row => 
                 row[7] && row[7].trim() === jamaita && 
                 row[9] && row[9].trim() === kanbanParte &&
@@ -314,7 +308,6 @@
             );
 
             if (validRow) {
-                // Consultar metadatos visuales de Firebase si existen para la fase final
                 const s = await getDoc(doc(db, "Maestro_Partes", idCliente));
                 pendingData = s.exists() ? s.data() : {};
                 document.getElementById('btn-res').style.display = 'block';
@@ -342,6 +335,7 @@
         const t = document.getElementById('step-txt');
         if(step === 2) t.innerText = "PASO 2: KANBAN";
         if(step === 3) t.innerText = "PASO 3: ID CLIENTE";
+        
         resumeScanning();
     };
 
