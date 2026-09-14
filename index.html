@@ -7,10 +7,10 @@
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
     <script src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #000; color: white; overflow: hidden; }
-        video { width: 100%; height: 40%; object-fit: cover; background: #111; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #000; color: white; overflow: hidden; }
+        video { width: 100%; height: 40%; object-fit: cover; background: #111; display: block; }
         .panel { position: fixed; bottom: 0; width: 100%; height: 60%; background: white; color: #333; border-radius: 25px 25px 0 0; padding: 20px; box-sizing: border-box; overflow-y: auto; }
-        .btn-main { background: #1a1c2c; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; }
+        .btn-main { background: #1a1c2c; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
         .btn-flash { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: white; border: 1px solid white; padding: 12px; border-radius: 50%; z-index: 100; font-size: 20px; }
         #res-val { font-size: 24px; font-weight: 800; color: #e30613; text-align: center; border: 2px dashed #e30613; margin: 10px 0; padding: 10px; background: #fff5f5; border-radius: 10px; min-height: 40px; word-break: break-all; }
         .img-verify { width: 100%; height: 160px; object-fit: contain; background: #f0f0f0; border-radius: 12px; display: none; margin-bottom: 10px; border: 1px solid #ddd; }
@@ -24,7 +24,7 @@
 <body>
 
 <button class="btn-flash" onclick="toggleFlash()">🔦</button>
-<video id="webcam" autoplay playsinline muted></video>
+<video id="webcam" autoplay playsinline webkit-playsinline muted></video>
 
 <div class="panel">
     <div id="ui-login">
@@ -91,13 +91,13 @@
     let idCliente = ""; 
     
     let paused = false; 
-    let isScanningActive = false;
     let track = null;
     let t_ok = ""; 
     let retryCount = 0; 
     let pendingData = null;
     let codeReader = null;
     let sheetData = [];
+    let ocrTimer = null;
 
     async function loadSheetData() {
         try {
@@ -141,7 +141,7 @@
         }
     };
 
-    function start(u) {
+    async function start(u) {
         user = u;
         document.getElementById('user-display').innerText = u.nombre;
         document.getElementById('ui-login').style.display = 'none';
@@ -149,14 +149,29 @@
         
         loadSheetData();
 
+        const videoElem = document.getElementById('webcam');
+        // Configuraciones indispensables para iOS Safari
+        videoElem.setAttribute('playsinline', 'true');
+        videoElem.setAttribute('webkit-playsinline', 'true');
+        videoElem.muted = true;
+
         codeReader = new ZXing.BrowserMultiFormatReader();
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(s => {
-            track = s.getVideoTracks()[0];
-            const videoElem = document.getElementById('webcam');
-            videoElem.srcObject = s;
-            videoElem.play();
-            resumeScanning();
-        });
+        
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { exact: "environment" } }
+            }).catch(() => {
+                return navigator.mediaDevices.getUserMedia({ video: true });
+            });
+            
+            track = stream.getVideoTracks()[0];
+            videoElem.srcObject = stream;
+            await videoElem.play();
+            
+            startScanner();
+        } catch(err) {
+            alert("No se pudo acceder a la cámara. Por favor autoriza los permisos en Safari.");
+        }
     }
 
     async function logToDB(status, msg = "") {
@@ -186,77 +201,82 @@
         setTimeout(() => { el.style.display = 'none'; }, 2000);
     }
 
+    function stopScanner() {
+        if (codeReader) {
+            try { codeReader.reset(); } catch(e) {}
+        }
+        if (ocrTimer) {
+            clearInterval(ocrTimer);
+            ocrTimer = null;
+        }
+    }
+
     function resumeScanning() {
         paused = false;
         document.getElementById('btn-res').style.display = 'none';
         document.getElementById('res-val').innerText = "---";
-        
-        if (codeReader) {
-            try { codeReader.reset(); } catch(e) {}
+        startScanner();
+    }
+
+    function startScanner() {
+        stopScanner();
+        paused = false;
+
+        const videoElem = document.getElementById('webcam');
+        if (videoElem.paused) {
+            videoElem.play().catch(() => {});
         }
-        
-        isScanningActive = false;
-        setTimeout(scanLoop, 100);
+
+        if (step === 1 || step === 2) {
+            codeReader.decodeFromVideoElement(videoElem, (result, err) => {
+                if (result && !paused) {
+                    processFound(result.getText());
+                }
+            });
+        } else if (step === 3) {
+            ocrTimer = setInterval(runOCR, 1000);
+        }
+    }
+
+    async function runOCR() {
+        if (paused || step !== 3) return;
+        const videoElem = document.getElementById('webcam');
+        if (!videoElem.videoWidth) return;
+
+        try {
+            const c = document.createElement('canvas');
+            c.width = videoElem.videoWidth || 640;
+            c.height = videoElem.videoHeight || 480;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(videoElem, 0, 0, c.width, c.height);
+
+            const { data: { text } } = await Tesseract.recognize(c, 'eng');
+            const raw = text.toUpperCase().split(/[\s\n]+/);
+            
+            let fm = null;
+            for (let w of raw) {
+                const p = w.replace(/[^A-Z0-9]/g, '');
+                if (p.match(/^M\d{3,4}$/)) fm = p;
+            }
+            if (fm && !paused) {
+                processFound(fm);
+            }
+        } catch (e) {
+            console.error("Error en OCR:", e);
+        }
     }
 
     function triggerLock(msg) {
         paused = true;
+        stopScanner();
         logToDB("NG", msg);
         document.getElementById('lock-msg').innerText = msg;
         document.getElementById('lock').style.display = 'flex';
     }
 
-    async function scanLoop() {
-        if(paused || step > 3 || isScanningActive) {
-            return;
-        }
-
-        isScanningActive = true;
-        const videoElem = document.getElementById('webcam');
-
-        if (step === 1 || step === 2) {
-            try {
-                const result = await codeReader.decodeFromVideoElement(videoElem);
-                if (result && !paused) {
-                    processFound(result.getText());
-                    isScanningActive = false;
-                    return;
-                }
-            } catch (err) {
-                // Cuadro sin código detectado
-            }
-        } else if (step === 3) {
-            try {
-                const c = document.createElement('canvas'); 
-                c.width = 400; 
-                c.height = 300;
-                c.getContext('2d').drawImage(videoElem, 0, 0, 400, 300);
-                const { data: { text } } = await Tesseract.recognize(c, 'eng');
-                const raw = text.toUpperCase().split(/[\s\n]+/);
-                
-                let fm = null;
-                for (let w of raw) {
-                    const p = w.replace(/[^A-Z0-9]/g, '');
-                    if (p.match(/^M\d{3,4}$/)) fm = p;
-                }
-                if (fm && !paused) {
-                    processFound(fm);
-                    isScanningActive = false;
-                    return;
-                }
-            } catch (e) {
-                console.error("Error OCR", e);
-            }
-        }
-
-        isScanningActive = false;
-        if(!paused && step <= 3) {
-            setTimeout(scanLoop, 250);
-        }
-    }
-
     async function processFound(val) {
         paused = true;
+        stopScanner();
         
         if (step === 1) {
             jamaita = val.trim();
@@ -342,6 +362,7 @@
     function initStep4(data) {
         step = 4;
         paused = true;
+        stopScanner();
         document.getElementById('step-txt').innerText = "PASO 4: TEKIN VISUAL";
         document.getElementById('controls-standard').style.display = 'none';
         document.getElementById('step4-container').style.display = 'block';
