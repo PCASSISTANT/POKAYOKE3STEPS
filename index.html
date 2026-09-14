@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KTMEX Poka-Yoke V4.7</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #000; color: white; overflow: hidden; }
+        video { width: 100%; height: 40%; object-fit: cover; }
+        .panel { position: fixed; bottom: 0; width: 100%; height: 60%; background: white; color: #333; border-radius: 25px 25px 0 0; padding: 20px; box-sizing: border-box; overflow-y: auto; }
+        .btn-main { background: #1a1c2c; color: white; border: none; padding: 15px; width: 100%; border-radius: 10px; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; }
+        .btn-flash { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: white; border: 1px solid white; padding: 12px; border-radius: 50%; z-index: 100; font-size: 20px; }
+        #res-val { font-size: 24px; font-weight: 800; color: #e30613; text-align: center; border: 2px dashed #e30613; margin: 10px 0; padding: 10px; background: #fff5f5; border-radius: 10px; min-height: 40px; word-break: break-all; }
+        .img-verify { width: 100%; height: 160px; object-fit: contain; background: #f0f0f0; border-radius: 12px; display: none; margin-bottom: 10px; border: 1px solid #ddd; }
+        .option-btn { background: #f8f9fa; border: 2px solid #dee2e6; color: #333; padding: 15px; width: 100%; border-radius: 8px; margin-bottom: 10px; text-align: center; font-weight: bold; cursor: pointer; font-size: 18px; }
+        .lock-ui { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #e30613; z-index: 5000; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
+        input { width: 85%; padding: 15px; border-radius: 8px; border: 1px solid #ccc; font-size: 18px; text-align: center; margin-bottom: 10px; }
+        #retry-counter { font-size: 13px; color: #666; text-align: center; margin-top: 5px; font-weight: bold; }
+        #msg-pop { color: #e30613; font-weight: bold; text-align: center; display: none; margin-top: 10px; background: #ffebeb; padding: 8px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<button class="btn-flash" onclick="toggleFlash()">🔦</button>
+<video id="webcam" autoplay playsinline></video>
+
+<div class="panel">
+    <div id="ui-login">
+        <h2 style="color:#e30613; margin-top:0;">Acceso KTMEX</h2>
+        <input type="text" id="nom-input" placeholder="Nómina">
+        <div id="pin-box" style="display:none;"><input type="password" id="pin-input" placeholder="PIN Líder"></div>
+        <button class="btn-main" onclick="checkLogin()">INGRESAR</button>
+    </div>
+
+    <div id="ui-scan" style="display:none;">
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+            <h3 id="step-txt" style="margin:0; color:#1a1c2c;">PASO 1: JAMAITA</h3>
+            <span id="user-display" style="font-size:10px; color:#999;"></span>
+        </div>
+        <div id="res-val">---</div>
+        <div id="msg-pop"></div>
+
+        <div id="step4-container" style="display:none;">
+            <p style="font-weight:bold; font-size:14px; margin-bottom:5px;">Verificación Visual de Tekin:</p>
+            <img id="img-tekin" class="img-verify">
+            <div id="options-area" style="display: flex; flex-direction: column;"></div>
+        </div>
+
+        <div id="controls-standard">
+            <button id="btn-res" class="btn-main" style="display:none; background:#27ae60;" onclick="goNext()">CONTINUAR</button>
+            <button id="btn-retry" class="btn-main" style="background:#f39c12;" onclick="handleRetry()">🔄 REPETIR ESCANEO</button>
+            <div id="retry-counter">Intentos de error: 0/5</div>
+        </div>
+
+        <button id="btn-finish" class="btn-main" style="display:none; background:#27ae60;" onclick="resetToStepOne()">✅ FINALIZAR PIEZA</button>
+    </div>
+</div>
+
+<div id="lock" class="lock-ui">
+    <h1 style="font-size:50px; margin:0;">🛑</h1>
+    <h2 id="lock-msg">BLOQUEO DE SEGURIDAD</h2>
+    <p>Exceso de errores o reintentos. Requiere PIN de Líder.</p>
+    <input type="password" id="pin-tl" placeholder="PIN LÍDER">
+    <button class="btn-main" style="background:white; color:#e30613; width:85%;" onclick="unlock()">DESBLOQUEAR</button>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js";
+    import { getFirestore, doc, getDoc, collection, addDoc, serverTimestamp, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyA6Il03GHS4L_eDY1Kv3fMyF2EwuYLQ5qY",
+        authDomain: "logistica-ktmex.firebaseapp.com",
+        projectId: "logistica-ktmex",
+        storageBucket: "logistica-ktmex.firebasestorage.app",
+        messagingSenderId: "166597623735",
+        appId: "1:166597623735:web:c0f8d372bc1ee12d81b232"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // URL para consultar la base de datos de Google Sheets en formato CSV
+    const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1GkWY2r-kz_wfv_-LPEeFEdKe1qNILTV86pln2xg_rIM/gviz/tq?tqx=out:csv";
+
+    let user = null; 
+    let step = 1; 
+    let jamaita = ""; // Guardará Sebango (Columna H)
+    let kanbanParte = ""; // Guardará Número de Parte (Columna J)
+    let idCliente = ""; // Guardará ID Cliente (Columna I)
+    
+    let paused = false; 
+    let track = null;
+    let t_ok = ""; 
+    let retryCount = 0; 
+    let pendingData = null;
+    let codeReader = null;
+    let sheetData = [];
+
+    // Cargar datos de Google Sheets
+    async function loadSheetData() {
+        try {
+            const response = await fetch(SHEET_CSV_URL);
+            const data = await response.text();
+            sheetData = parseCSV(data);
+        } catch (e) {
+            console.error("Error al cargar la base de datos de Google Sheets", e);
+        }
+    }
+
+    function parseCSV(text) {
+        const lines = text.split('\n');
+        return lines.map(line => {
+            const matches = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+            return matches ? matches.map(cell => cell.replace(/^"|"$/g, '').trim()) : line.split(',');
+        });
+    }
+
+    window.toggleFlash = async () => {
+        if (!track) return;
+        try {
+            const caps = track.getCapabilities();
+            if (caps.torch) {
+                const s = track.getSettings();
+                await track.applyConstraints({ advanced: [{ torch: !s.torch }] });
+            }
+        } catch(e) {}
+    };
+
+    window.checkLogin = async () => {
+        const nom = document.getElementById('nom-input').value;
+        const pin = document.getElementById('pin-input').value;
+        const s = await getDoc(doc(db, "Usuarios", nom));
+        if(!s.exists()) return;
+        const u = s.data();
+        if(u.nivel === "Operador") start(u);
+        else {
+            document.getElementById('pin-box').style.display = 'block';
+            if(pin === u.pin) start(u);
+        }
+    };
+
+    function start(u) {
+        user = u;
+        document.getElementById('user-display').innerText = u.nombre;
+        document.getElementById('ui-login').style.display = 'none';
+        document.getElementById('ui-scan').style.display = 'block';
+        
+        loadSheetData();
+
+        codeReader = new ZXing.BrowserMultiFormatReader();
+        navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}}).then(s => {
+            track = s.getVideoTracks()[0];
+            document.getElementById('webcam').srcObject = s; 
+            scanLoop();
+        });
+    }
+
+    async function logToDB(status, msg = "") {
+        await addDoc(collection(db, "Bitacora_Incidencias"), {
+            usuario: user.nombre, status, customer_id: jamaita || "N/A", error_msg: msg, timestamp: serverTimestamp()
+        });
+    }
+
+    window.handleRetry = () => {
+        retryCount++;
+        updateRetryUI();
+        if (retryCount >= 5) {
+            triggerLock("EXCESO DE REINTENTOS");
+        } else {
+            resumeScanning();
+        }
+    };
+
+    function updateRetryUI() {
+        document.getElementById('retry-counter').innerText = `Intentos de error: ${retryCount}/5`;
+    }
+
+    function showStatusMsg(txt) {
+        const el = document.getElementById('msg-pop');
+        el.innerText = txt;
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 2000);
+    }
+
+    function resumeScanning() {
+        paused = false;
+        document.getElementById('btn-res').style.display = 'none';
+        document.getElementById('res-val').innerText = "---";
+        requestAnimationFrame(scanLoop);
+    }
+
+    function triggerLock(msg) {
+        logToDB("NG", msg);
+        document.getElementById('lock-msg').innerText = msg;
+        document.getElementById('lock').style.display = 'flex';
+    }
+
+    async function scanLoop() {
+        if(paused || step > 3) return;
+
+        const videoElem = document.getElementById('webcam');
+
+        // Escaneo mediante Código QR para Paso 1 y Paso 2
+        if (step === 1 || step === 2) {
+            try {
+                const result = await codeReader.decodeFromVideoElement(videoElem);
+                if (result) {
+                    processFound(result.getText());
+                    return;
+                }
+            } catch (err) {
+                // Continuar intentando si no se detecta código QR
+            }
+        } else if (step === 3) {
+            // Paso 3 mediante OCR de Tesseract
+            const c = document.createElement('canvas'); c.width = 400; c.height = 300;
+            c.getContext('2d').drawImage(videoElem, 0, 0, 400, 300);
+            const { data: { text } } = await Tesseract.recognize(c, 'eng');
+            const raw = text.toUpperCase().split(/[\s\n]+/);
+            
+            let fm = null;
+            for (let w of raw) {
+                const p = w.replace(/[^A-Z0-9]/g, '');
+                if (p.match(/^M\d{3,4}$/)) fm = p;
+            }
+            if (fm) {
+                processFound(fm);
+                return;
+            }
+        }
+
+        if(!paused) requestAnimationFrame(scanLoop);
+    }
+
+    async function processFound(val) {
+        paused = true;
+        
+        if (step === 1) {
+            // Paso 1: Escaneo QR -> Sebango interno (Columna H)
+            jamaita = val.trim();
+            document.getElementById('res-val').innerText = jamaita;
+
+            // Verificar si existe el Sebango en la columna H (Índice 7)
+            const matchH = sheetData.some(row => row[7] && row[7].trim() === jamaita);
+            if (matchH) {
+                document.getElementById('btn-res').style.display = 'block';
+                logToDB("OK", "Paso 1: Jamaita QR Detectada");
+            } else {
+                retryCount++;
+                updateRetryUI();
+                if (retryCount >= 5) triggerLock("SEBANGO NO ENCONTRADO EN BD");
+                else {
+                    showStatusMsg("Sebango no registrado. Reintentando...");
+                    setTimeout(resumeScanning, 1500);
+                }
+            }
+        } else if (step === 2) {
+            // Paso 2: Escaneo QR -> Extracción de Número de Parte de la cadena estilo "1000-48514-AK010"
+            const parsedPart = val.includes('-') ? val.substring(val.indexOf('-') + 1).trim() : val.trim();
+            kanbanParte = parsedPart;
+            document.getElementById('res-val').innerText = kanbanParte;
+
+            // Comparar si existen filas donde coincida el Sebango (Col H / Ind 7) y el Número de Parte (Col J / Ind 9)
+            const matchHJ = sheetData.some(row => 
+                row[7] && row[7].trim() === jamaita && 
+                row[9] && row[9].trim() === kanbanParte
+            );
+
+            if (matchHJ) {
+                document.getElementById('btn-res').style.display = 'block';
+                logToDB("OK", "Paso 2: Kanban Parte OK");
+            } else {
+                retryCount++;
+                updateRetryUI();
+                if (retryCount >= 5) triggerLock("MEZCLA DE PARTE / SEBANGO");
+                else {
+                    showStatusMsg("Número de Parte no coincide con Sebango. Reintentando...");
+                    setTimeout(resumeScanning, 1500);
+                }
+            }
+        } else if (step === 3) {
+            // Paso 3: ID Cliente (Columna I)
+            idCliente = val.trim();
+            document.getElementById('res-val').innerText = idCliente;
+
+            // Comparar coincidencia completa de las 3 columnas: Col H (Ind 7), Col J (Ind 9) y Col I (Ind 8)
+            const validRow = sheetData.find(row => 
+                row[7] && row[7].trim() === jamaita && 
+                row[9] && row[9].trim() === kanbanParte &&
+                row[8] && row[8].trim() === idCliente
+            );
+
+            if (validRow) {
+                // Consultar metadatos visuales de Firebase si existen para la fase final
+                const s = await getDoc(doc(db, "Maestro_Partes", idCliente));
+                pendingData = s.exists() ? s.data() : {};
+                document.getElementById('btn-res').style.display = 'block';
+                logToDB("OK", "Paso 3: ID Cliente OK");
+            } else {
+                retryCount++;
+                updateRetryUI();
+                if (retryCount >= 5) triggerLock("ID CLIENTE INCORRECTO");
+                else {
+                    showStatusMsg("ID Cliente no coincide con Registro. Reintentando...");
+                    setTimeout(resumeScanning, 1500);
+                }
+            }
+        }
+    }
+
+    window.goNext = () => {
+        if(step === 3) {
+            initStep4(pendingData || {});
+            return;
+        }
+        step++; paused = false;
+        document.getElementById('btn-res').style.display = 'none';
+        document.getElementById('res-val').innerText = "---";
+        const t = document.getElementById('step-txt');
+        if(step === 2) t.innerText = "PASO 2: KANBAN";
+        if(step === 3) t.innerText = "PASO 3: ID CLIENTE";
+        scanLoop();
+    };
+
+    function initStep4(data) {
+        step = 4;
+        document.getElementById('step-txt').innerText = "PASO 4: TEKIN VISUAL";
+        document.getElementById('controls-standard').style.display = 'none';
+        document.getElementById('step4-container').style.display = 'block';
+        
+        const img = document.getElementById('img-tekin');
+        if(data && data.img_url) { 
+            img.src = data.img_url; 
+            img.style.display = 'block'; 
+        } else {
+            img.style.display = 'none';
+        }
+        
+        t_ok = (data && data.Tekin_OK) || "Correcto";
+        let t_ng = (data && data.Tekin_NG) || "Incorrecto";
+        const opts = [t_ok, t_ng].sort(() => Math.random() - 0.5);
+        
+        const area = document.getElementById('options-area');
+        area.innerHTML = "";
+        opts.forEach(o => {
+            const b = document.createElement('button');
+            b.className = "option-btn";
+            b.innerText = o;
+            b.onclick = () => {
+                if(o === t_ok) {
+                    area.innerHTML = "<p style='color:green; font-weight:bold; text-align:center;'>✅ VALIDADO CORRECTAMENTE</p>";
+                    document.getElementById('btn-finish').style.display = 'block';
+                    logToDB("OK", "Paso 4: Tekin Verificado");
+                } else {
+                    triggerLock("ERROR SELECCIÓN TEKIN");
+                }
+            };
+            area.appendChild(b);
+        });
+    }
+
+    window.resetToStepOne = () => {
+        step = 1; jamaita = ""; kanbanParte = ""; idCliente = ""; paused = false; retryCount = 0; pendingData = null;
+        document.getElementById('step4-container').style.display = 'none';
+        document.getElementById('controls-standard').style.display = 'block';
+        document.getElementById('btn-finish').style.display = 'none';
+        document.getElementById('btn-res').style.display = 'none';
+        document.getElementById('retry-counter').innerText = "Intentos de error: 0/5";
+        document.getElementById('step-txt').innerText = "PASO 1: JAMAITA";
+        document.getElementById('res-val').innerText = "---";
+        scanLoop();
+    };
+
+    window.unlock = async () => {
+        const p = document.getElementById('pin-tl').value;
+        const q = query(collection(db, "Usuarios"), where("nivel", "==", "Lider"), where("pin", "==", p));
+        const s = await getDocs(q);
+        if(!s.empty) {
+            document.getElementById('lock').style.display = 'none';
+            document.getElementById('pin-tl').value = "";
+            resetToStepOne();
+        }
+    };
+</script>
+</body>
+</html>
