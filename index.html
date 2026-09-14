@@ -295,7 +295,23 @@
                 }
             }
         } else if (step === 2) {
-            const parsedPart = val.includes('-') ? val.substring(val.indexOf('-') + 1).trim() : val.trim();
+            // LÓGICA DE EXTRACCIÓN DEL NÚMERO DE PARTE
+            const cleanVal = val.trim();
+            const parts = cleanVal.split('-');
+            
+            let parsedPart = cleanVal;
+            if (parts.length >= 4) {
+                // Formato: PREFIJO - PARTE_1 - PARTE_2 - SEBANGO (Ej. 1-48514-AK010-K099)
+                // Se toma desde el segundo segmento hasta el penúltimo segmento
+                parsedPart = parts.slice(1, -1).join('-');
+            } else if (parts.length === 3) {
+                // Formato con prefijo y número de parte sin guión interno (Ej. 1-48514AK010-K099)
+                parsedPart = parts[1];
+            } else if (cleanVal.includes('-')) {
+                // Formato básico con un solo prefijo (Ej. 1-48514-AK010)
+                parsedPart = cleanVal.substring(cleanVal.indexOf('-') + 1).trim();
+            }
+
             kanbanParte = parsedPart;
             document.getElementById('res-val').innerText = kanbanParte;
 
