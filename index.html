@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KTMEX Poka-Yoke V4.8</title>
+    <title>KTMEX Poka-Yoke V4.9 iOS Fix</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
     <script src="https://unpkg.com/@zxing/library@latest"></script>
     <style>
@@ -96,6 +96,7 @@
     let retryCount = 0; 
     let pendingData = null;
     let codeReader = null;
+    let selectedDeviceId = null;
     let sheetData = [];
     let ocrTimer = null;
 
@@ -149,28 +150,22 @@
         
         loadSheetData();
 
-        const videoElem = document.getElementById('webcam');
-        // Configuraciones indispensables para iOS Safari
-        videoElem.setAttribute('playsinline', 'true');
-        videoElem.setAttribute('webkit-playsinline', 'true');
-        videoElem.muted = true;
-
         codeReader = new ZXing.BrowserMultiFormatReader();
-        
+
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { exact: "environment" } }
-            }).catch(() => {
-                return navigator.mediaDevices.getUserMedia({ video: true });
-            });
-            
-            track = stream.getVideoTracks()[0];
-            videoElem.srcObject = stream;
-            await videoElem.play();
-            
+            const videoInputDevices = await codeReader.listVideoInputDevices();
+            // Buscar la cámara trasera para iPhone / iOS
+            const backCamera = videoInputDevices.find(device => 
+                device.label.toLowerCase().includes('back') || 
+                device.label.toLowerCase().includes('trasera') || 
+                device.label.toLowerCase().includes('environment')
+            );
+
+            selectedDeviceId = backCamera ? backCamera.deviceId : videoInputDevices[0]?.deviceId;
+
             startScanner();
         } catch(err) {
-            alert("No se pudo acceder a la cámara. Por favor autoriza los permisos en Safari.");
+            alert("No se pudo obtener la lista de cámaras o autorizar permisos en Safari.");
         }
     }
 
@@ -222,19 +217,23 @@
         stopScanner();
         paused = false;
 
-        const videoElem = document.getElementById('webcam');
-        if (videoElem.paused) {
-            videoElem.play().catch(() => {});
-        }
-
         if (step === 1 || step === 2) {
-            codeReader.decodeFromVideoElement(videoElem, (result, err) => {
+            codeReader.decodeFromVideoDevice(selectedDeviceId, 'webcam', (result, err) => {
                 if (result && !paused) {
                     processFound(result.getText());
                 }
-            });
+            }).catch(err => console.error(err));
         } else if (step === 3) {
-            ocrTimer = setInterval(runOCR, 1000);
+            // Re-inicializa la transmisión para el modo OCR de Tesseract
+            navigator.mediaDevices.getUserMedia({
+                video: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined, facingMode: "environment" }
+            }).then(stream => {
+                const videoElem = document.getElementById('webcam');
+                track = stream.getVideoTracks()[0];
+                videoElem.srcObject = stream;
+                videoElem.play();
+                ocrTimer = setInterval(runOCR, 1000);
+            });
         }
     }
 
@@ -245,8 +244,8 @@
 
         try {
             const c = document.createElement('canvas');
-            c.width = videoElem.videoWidth || 640;
-            c.height = videoElem.videoHeight || 480;
+            c.width = videoElem.videoWidth;
+            c.height = videoElem.videoHeight;
             const ctx = c.getContext('2d');
             ctx.drawImage(videoElem, 0, 0, c.width, c.height);
 
