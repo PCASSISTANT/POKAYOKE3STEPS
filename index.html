@@ -256,8 +256,9 @@
 
         try {
             const c = document.createElement('canvas');
-            c.width = videoElem.videoWidth;
-            c.height = videoElem.videoHeight;
+            const scale = 640 / videoElem.videoWidth;
+            c.width = 640;
+            c.height = videoElem.videoHeight * scale;
             const ctx = c.getContext('2d');
             ctx.drawImage(videoElem, 0, 0, c.width, c.height);
 
@@ -374,9 +375,10 @@
             });
 
             if (validRow) {
-                const s = await getDoc(doc(db, "Maestro_Partes", idCliente));
-                pendingData = s.exists() ? s.data() : {};
                 document.getElementById('btn-res').style.display = 'block';
+                getDoc(doc(db, "Maestro_Partes", idCliente))
+                    .then(s => { pendingData = s.exists() ? s.data() : {}; })
+                    .catch(e => console.error(e));
                 logToDB("OK", "Paso 3: ID Cliente OK");
             } else {
                 retryCount++;
