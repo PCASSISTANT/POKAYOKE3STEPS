@@ -69,7 +69,7 @@
         padding: 16px 20px 5px 20px;
     }
     .step-title {
-        color: var(--red-step);
+        color: var(--green-ok);
         font-size: 20px;
         font-weight: 900;
         text-transform: uppercase;
@@ -85,7 +85,7 @@
         font-weight: 600;
     }
 
-    /* BARRITAS DE PROGRESO */
+    /* BARRITAS DE PROGRESO (MODIFICADAS A VERDE) */
     .progress-container {
         display: flex;
         gap: 8px;
@@ -101,8 +101,8 @@
         transition: all 0.3s ease;
     }
     .progress-bar.active {
-        background-color: var(--red-step);
-        box-shadow: 0 0 10px rgba(255, 11, 33, 0.6);
+        background-color: var(--green-ok);
+        box-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
     }
 
     /* CAJA PRINCIPAL DE ESCANEO */
@@ -141,7 +141,7 @@
         word-break: break-all;
     }
 
-    /* BOTONES */
+    /* BOTONES Y ETIQUETAS */
     .btn-blue-large {
         background-color: var(--blue-btn);
         color: white;
@@ -162,6 +162,23 @@
         background-color: #0062cc;
     }
     .btn-green { background-color: var(--green-ok); }
+
+    /* NUEVO DISEÑO PARA INDICADOR DE BOTÓN FÍSICO (YA NO ES BOTÓN) */
+    .scanner-indicator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        color: var(--green-ok);
+        background: rgba(16, 185, 129, 0.1);
+        border: 1px dashed var(--green-ok);
+        padding: 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 20px;
+        text-align: center;
+    }
 
     /* INTENTOS */
     .intentos-text {
@@ -205,7 +222,13 @@
         font-family: monospace;
         font-weight: 700;
         z-index: 10;
+        transition: all 0.2s ease;
     }
+    .ocr-detected {
+        background: rgba(16, 185, 129, 0.95);
+        color: white;
+    }
+    
     .img-verify {
         width: 100%;
         height: 140px;
@@ -262,7 +285,7 @@
 
 <!-- VISTA 1: LOGIN -->
 <div id="ui-login" class="login-container">
-    <h2 style="text-align:center; color:var(--blue-btn); margin-bottom: 30px;">KTMEX POKA-YOKE</h2>
+    <h2 style="text-align:center; color:var(--green-ok); margin-bottom: 30px;">KTMEX POKA-YOKE</h2>
     <input type="text" id="nom-input" class="input-box" placeholder="ESCRIBIR O ESCANEAR NÓMINA" autocomplete="off">
     <div id="pin-box" style="display:none;">
         <input type="password" id="pin-input" class="input-box" placeholder="PIN DE LÍDER" autocomplete="off">
@@ -303,7 +326,7 @@
 
             <!-- Cámara para paso 3 -->
             <div id="ocr-viewport">
-                <div id="ocr-live-read" class="ocr-raw-live">OCR: ENFOCANDO...</div>
+                <div id="ocr-live-read" class="ocr-raw-live">BUSCANDO KANBAN DE CLIENTE...</div>
                 <video id="webcam" autoplay playsinline webkit-playsinline muted></video>
                 <div class="ocr-reticle"></div>
             </div>
@@ -315,10 +338,10 @@
             </div>
         </div>
 
-        <!-- CONTROLES INFERIORES -->
-        <button id="btn-manual-trigger" class="btn-blue-large">
-            <span style="font-size:20px;">🔘</span> USAR BOTÓN FÍSICO (LATERAL)
-        </button>
+        <!-- CONTROLES INFERIORES: INDICADOR DE ESCÁNER FÍSICO REDISEÑADO -->
+        <div id="btn-manual-trigger" class="scanner-indicator">
+            <span>📡</span> ESPERANDO ESCÁNER FÍSICO
+        </div>
         
         <button id="btn-res" class="btn-blue-large btn-green" style="display:none;">CONTINUAR AL SIGUIENTE PASO</button>
         <button id="btn-finish" class="btn-blue-large btn-green" style="display:none;">FINALIZAR PIEZA</button>
@@ -494,6 +517,7 @@
         const subPrompt = document.getElementById('sub-prompt');
         const ocrView = document.getElementById('ocr-viewport');
         const step4View = document.getElementById('step4-container');
+        const ocrLiveRead = document.getElementById('ocr-live-read');
         
         ocrView.style.display = 'none';
         step4View.style.display = 'none';
@@ -503,6 +527,10 @@
         document.getElementById('btn-res').style.display = 'none';
         document.getElementById('btn-finish').style.display = 'none';
         paused = false;
+
+        // Reset visual de OCR
+        ocrLiveRead.innerText = "BUSCANDO KANBAN DE CLIENTE...";
+        ocrLiveRead.classList.remove('ocr-detected');
 
         if(step === 1) {
             title.innerText = "PASO 1: JAMAITA";
@@ -590,7 +618,7 @@
         }
     });
 
-    // 4. LÓGICA CORE DE VALIDACIÓN (RESTAURADA DEL 2DO CÓDIGO)
+    // 4. LÓGICA CORE DE VALIDACIÓN
     async function processFound(val) {
         paused = true;
         const rawVal = val.trim();
@@ -653,19 +681,21 @@
             });
 
             if (validRow) {
-                stopCameraOCR();
-                getDoc(doc(db, "Maestro_Partes", idCliente))
-                    .then(s => { pendingData = s.exists() ? s.data() : {}; })
-                    .catch(() => { pendingData = {}; });
-                
-                // Mostrar éxito antes de avanzar al paso 4 (para emular funcionalidad del botón del original)
-                document.getElementById('main-prompt').style.display = 'block';
-                document.getElementById('sub-prompt').style.display = 'block';
-                document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
-                document.getElementById('sub-prompt').innerText = idCliente;
-                document.getElementById('btn-res').style.display = 'block';
-                
-                logToDB("OK", "Paso 3: ID Cliente OK");
+                // Pausar unos instantes para que se vea el freeze de pantalla verde
+                setTimeout(() => {
+                    stopCameraOCR();
+                    getDoc(doc(db, "Maestro_Partes", idCliente))
+                        .then(s => { pendingData = s.exists() ? s.data() : {}; })
+                        .catch(() => { pendingData = {}; });
+                    
+                    document.getElementById('main-prompt').style.display = 'block';
+                    document.getElementById('sub-prompt').style.display = 'block';
+                    document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
+                    document.getElementById('sub-prompt').innerText = idCliente;
+                    document.getElementById('btn-res').style.display = 'block';
+                    
+                    logToDB("OK", "Paso 3: ID Cliente OK");
+                }, 800); // 800ms de visualización antes de ocultar la cámara
             } else {
                 handleStepFailure("ID CLIENTE INCORRECTO", "ID Cliente no coincide con Registro. Reintentando...");
             }
@@ -684,7 +714,7 @@
         }).catch(() => {});
     }
 
-    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR (RESTAURADO)
+    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR (RESTAURADO Y PAUSABLE)
     async function startCameraOCR() {
         document.getElementById('ocr-viewport').style.display = 'block';
         try {
@@ -772,16 +802,20 @@
             const tokens = recognizedText.toUpperCase().split(/[\s\n]+/);
             for (let w of tokens) {
                 const cleaned = w.replace(/[^A-Z0-9]/g, '');
-                if (cleaned.length >= 3) {
-                    lastRawOcrToken = cleaned;
-                    document.getElementById('ocr-live-read').innerText = `OCR: ${cleaned}`;
-                }
                 const candidate = normalizeOcrCandidate(cleaned);
+                
+                // Si la BD contiene el candidato, validamos y PAUSAMOS visualmente
                 if (candidate && BASE_M_CODES.has(candidate)) {
                     if (cleaned !== candidate && candidate === expectedIdCliente) {
                         saveOcrLearningToFirebase(cleaned, candidate, currentThreshold);
                     }
                     if (!paused) { 
+                        // Congelar visualmente la lectura
+                        videoElem.pause(); 
+                        const ocrLiveRead = document.getElementById('ocr-live-read');
+                        ocrLiveRead.innerText = `DETECTADO: ${candidate}`;
+                        ocrLiveRead.classList.add('ocr-detected');
+                        
                         processFound(candidate); 
                         break; 
                     }
@@ -849,7 +883,7 @@
                 pop.style.display = 'none';
                 paused = false;
                 if(step === 1 || step === 2) focusHardwareScanner();
-            }, 1400); // Retraso de 1.4s idéntico al 2do código
+            }, 1400); 
         }
     }
 
