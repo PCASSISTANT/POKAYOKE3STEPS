@@ -100,6 +100,10 @@
     let sheetData = [];
     let ocrTimer = null;
 
+    // ----- VARIABLES PARA ESCÁNER ZEBRA -----
+    let zebraBuffer = "";
+    let zebraTimeout = null;
+
     async function loadSheetData() {
         try {
             const response = await fetch(SHEET_CSV_URL);
@@ -473,6 +477,37 @@
             resetToStepOne();
         }
     };
+
+    // ----- LOGICA PARA RECIBIR DATOS DEL ESCÁNER ZEBRA -----
+    document.addEventListener('keydown', (e) => {
+        // Ignorar si estamos en la pantalla de login o hay algún input activo
+        if (document.getElementById('ui-scan').style.display === 'none') return;
+        if (e.target.tagName.toUpperCase() === 'INPUT') return;
+        if (paused) return; // Si el sistema ya está procesando una pieza o bloqueado, no hacer nada
+
+        // Si se presiona 'Enter', es porque el lector terminó de enviar el código
+        if (e.key === 'Enter') {
+            if (zebraBuffer !== "") {
+                // Solo validar con el escáner Zebra para los pasos 1 (Jamaita) y 2 (Kanban)
+                if (step === 1 || step === 2) {
+                    processFound(zebraBuffer);
+                }
+                zebraBuffer = ""; // Limpiar el buffer después de procesar
+            }
+        } 
+        // Si no es un enter y la longitud de la tecla es 1 (una letra o número)
+        else if (e.key.length === 1) {
+            zebraBuffer += e.key;
+            clearTimeout(zebraTimeout);
+            
+            // Los escáneres escriben muy rápido. Si pasan más de 200 milisegundos
+            // sin presionar teclas, consideramos que fue el usuario por error y limpiamos.
+            zebraTimeout = setTimeout(() => {
+                zebraBuffer = "";
+            }, 200); 
+        }
+    });
+
 </script>
 </body>
 </html>
