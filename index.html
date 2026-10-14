@@ -50,9 +50,13 @@
         
         .fade-in { animation: fadeIn 0.4s ease forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        #zebra-dummy { opacity: 0.01; position: absolute; z-index: -1; width: 10px; height: 10px; top: 50%; left: 50%; }
     </style>
 </head>
 <body>
+
+<input type="text" id="zebra-dummy" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
 
 <div id="camera-container">
     <button class="btn-flash" onclick="toggleFlash()">🔦</button>
@@ -149,23 +153,42 @@
     let retryCount = 0, pendingData = null, sheetData = [];
     let track = null, ocrTimer = null, paddleReady = false;
 
-    let scanBuffer = '';
+    const zebraInput = document.getElementById('zebra-dummy');
     let scanTimeout;
-    
-    window.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT') return;
 
-        if (e.key === 'Enter' || e.keyCode === 13) {
-            e.preventDefault(); 
-            if (scanBuffer.trim() !== '') {
-                if (navigator.vibrate) navigator.vibrate(100);
-                processFound(scanBuffer.trim());
-                scanBuffer = '';
+    function keepZebraFocus() {
+        if (document.getElementById('ui-scan').style.display === 'block' && step < 3 && document.activeElement !== document.getElementById('pin-tl')) {
+            if (document.activeElement !== zebraInput) {
+                zebraInput.focus();
             }
-        } else if (e.key.length === 1) { 
-            scanBuffer += e.key;
+        }
+    }
+
+    setInterval(keepZebraFocus, 1000);
+    document.addEventListener('click', keepZebraFocus);
+
+    zebraInput.addEventListener('input', (e) => {
+        clearTimeout(scanTimeout);
+        scanTimeout = setTimeout(() => {
+            const val = zebraInput.value.trim();
+            if (val.length > 2) {
+                if (navigator.vibrate) navigator.vibrate(100);
+                zebraInput.value = '';
+                processFound(val);
+            }
+        }, 300);
+    });
+
+    zebraInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.keyCode === 13) {
+            e.preventDefault();
             clearTimeout(scanTimeout);
-            scanTimeout = setTimeout(() => { scanBuffer = ''; }, 400);
+            const val = zebraInput.value.trim();
+            if (val !== '') {
+                if (navigator.vibrate) navigator.vibrate(100);
+                zebraInput.value = '';
+                processFound(val);
+            }
         }
     });
 
@@ -202,9 +225,11 @@
         document.getElementById('ui-login').style.display = 'none';
         document.getElementById('ui-scan').style.display = 'block';
         initAppCore();
+        keepZebraFocus();
     }
 
     window.triggerZebraScanner = () => {
+        keepZebraFocus();
         window.location.href = "intent://#Intent;action=com.symbol.datawedge.api.ACTION_SOFTSCANTRIGGER;S.com.symbol.datawedge.api.EXTRA_PARAMETER=START_SCANNING;end";
     };
 
@@ -254,6 +279,7 @@
         document.getElementById('btn-res').style.display = 'block';
         document.getElementById('btn-trigger-zebra').style.display = 'none';
         addDoc(collection(db, "Bitacora_Incidencias"), { usuario: user.nombre, status: "OK", customer_id: jamaita, msg: logMsg, time: serverTimestamp() });
+        zebraInput.blur();
     }
 
     function failStep(msg) {
@@ -266,6 +292,7 @@
         
         if (retryCount >= 5) {
             stopCamera();
+            zebraInput.blur();
             document.getElementById('lock-msg').innerText = msg;
             document.getElementById('lock').style.display = 'flex';
             addDoc(collection(db, "Bitacora_Incidencias"), { usuario: user.nombre, status: "NG", customer_id: jamaita, error: msg, time: serverTimestamp() });
@@ -273,6 +300,7 @@
             setTimeout(() => { 
                 el.innerText = "ESPERANDO ESCANEO..."; 
                 el.className = "";
+                if(step < 3) keepZebraFocus();
             }, 2000);
         }
     }
@@ -297,11 +325,13 @@
         if (step === 2) {
             txt.innerText = "PASO 2: KANBAN";
             trigger.style.display = 'block';
+            keepZebraFocus();
         } else if (step === 3) {
             txt.innerText = "PASO 3: ID CLIENTE (OCR)";
             trigger.style.display = 'none';
             camContainer.style.display = 'block';
             panel.classList.remove('full-height');
+            zebraInput.blur();
             startCameraOCR();
         }
     }
@@ -382,6 +412,7 @@
         document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === 0));
         document.getElementById('retry-counter').innerText = "Intentos: 0/5";
         document.getElementById('btn-trigger-zebra').style.display = 'block';
+        keepZebraFocus();
     };
 
     window.unlock = async () => {
