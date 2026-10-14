@@ -155,16 +155,17 @@
     window.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT') return;
 
-        if (e.key === 'Enter') {
-            if (scanBuffer !== '') {
+        if (e.key === 'Enter' || e.keyCode === 13) {
+            e.preventDefault(); 
+            if (scanBuffer.trim() !== '') {
                 if (navigator.vibrate) navigator.vibrate(100);
-                processFound(scanBuffer);
+                processFound(scanBuffer.trim());
                 scanBuffer = '';
             }
-        } else if (e.key.length === 1) {
+        } else if (e.key.length === 1) { 
             scanBuffer += e.key;
             clearTimeout(scanTimeout);
-            scanTimeout = setTimeout(() => { scanBuffer = ''; }, 100);
+            scanTimeout = setTimeout(() => { scanBuffer = ''; }, 400);
         }
     });
 
