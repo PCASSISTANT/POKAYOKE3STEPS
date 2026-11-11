@@ -85,7 +85,7 @@
         font-weight: 600;
     }
 
-    /* BARRITAS DE PROGRESO (MODIFICADAS A VERDE) */
+    /* BARRITAS DE PROGRESO */
     .progress-container {
         display: flex;
         gap: 8px;
@@ -163,7 +163,6 @@
     }
     .btn-green { background-color: var(--green-ok); }
 
-    /* NUEVO DISEÑO PARA INDICADOR DE BOTÓN FÍSICO (YA NO ES BOTÓN) */
     .scanner-indicator {
         display: flex;
         align-items: center;
@@ -180,12 +179,23 @@
         text-align: center;
     }
 
-    /* INTENTOS */
     .intentos-text {
         text-align: center;
         color: var(--text-muted);
         font-size: 14px;
         font-weight: 700;
+    }
+
+    /* ESTILOS DE INPUT OCULTO SEGURO (NUEVO) */
+    .scanner-input-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
     }
 
     /* ELEMENTOS DEL PASO 3 Y 4 */
@@ -313,8 +323,8 @@
 
     <div class="workspace">
         
-        <!-- RECEPTOR OCULTO ZEBRA -->
-        <input type="text" id="zebra-wedge-input" inputmode="none" autocomplete="off" style="position:fixed; top:-100px; left:-100px; opacity:0;">
+        <!-- RECEPTOR OCULTO ZEBRA (MODIFICADO PARA TC22) -->
+        <input type="text" id="zebra-wedge-input" inputmode="none" autocomplete="off" class="scanner-input-hidden">
 
         <!-- ÁREA CENTRAL DE ESCANEO -->
         <div class="scan-box-dashed" id="scan-container">
@@ -338,7 +348,7 @@
             </div>
         </div>
 
-        <!-- CONTROLES INFERIORES: INDICADOR DE ESCÁNER FÍSICO REDISEÑADO -->
+        <!-- CONTROLES INFERIORES -->
         <div id="btn-manual-trigger" class="scanner-indicator">
             <span>📡</span> ESPERANDO ESCÁNER FÍSICO
         </div>
@@ -557,7 +567,9 @@
         }
     }
 
-    function focusHardwareScanner() { document.getElementById('zebra-wedge-input').focus(); }
+    function focusHardwareScanner() { 
+        document.getElementById('zebra-wedge-input').focus(); 
+    }
     
     // Captura del Wedge (Zebra) restaurada con TAB y ENTER
     const wedgeInput = document.getElementById('zebra-wedge-input');
@@ -572,7 +584,21 @@
         }
     });
 
-    // Captura Global para ráfagas (Restaurada exactamente como el 2do código)
+    // MANTENER EL FOCO DEL TC22 (NUEVO)
+    // Si el usuario toca la pantalla accidentalmente, el input recupera el foco
+    wedgeInput.addEventListener('blur', () => {
+        if (user && (step === 1 || step === 2) && !paused) {
+            setTimeout(() => {
+                const active = document.activeElement;
+                // No robar foco si el usuario está intentando interactuar con inputs reales o botones de error
+                if (active && active.tagName !== 'BUTTON' && active.tagName !== 'INPUT') {
+                    wedgeInput.focus();
+                }
+            }, 100);
+        }
+    });
+
+    // Captura Global para ráfagas 
     let keyBuffer = "", keyTimer = null;
     window.addEventListener('keydown', (e) => {
         const activeId = document.activeElement ? document.activeElement.id : "";
@@ -590,7 +616,6 @@
             return;
         }
 
-        // Permitir avanzar con botón físico (gatillo Zebra) si el paso fue validado
         if (paused && (e.key === 'Enter' || e.keyCode === 13) && document.getElementById('btn-res').style.display === 'block') {
             e.preventDefault();
             document.getElementById('btn-res').click();
@@ -608,7 +633,8 @@
         } else if (e.key.length === 1) {
             keyBuffer += e.key;
             clearTimeout(keyTimer);
-            keyTimer = setTimeout(() => { keyBuffer = ""; }, 400);
+            // TIEMPO AUMENTADO A 800ms PARA TC22 (Soluciona corte de código)
+            keyTimer = setTimeout(() => { keyBuffer = ""; }, 800); 
         }
     });
 
@@ -681,7 +707,6 @@
             });
 
             if (validRow) {
-                // Pausar unos instantes para que se vea el freeze de pantalla verde
                 setTimeout(() => {
                     stopCameraOCR();
                     getDoc(doc(db, "Maestro_Partes", idCliente))
@@ -695,7 +720,7 @@
                     document.getElementById('btn-res').style.display = 'block';
                     
                     logToDB("OK", "Paso 3: ID Cliente OK");
-                }, 800); // 800ms de visualización antes de ocultar la cámara
+                }, 800); 
             } else {
                 handleStepFailure("ID CLIENTE INCORRECTO", "ID Cliente no coincide con Registro. Reintentando...");
             }
@@ -714,7 +739,7 @@
         }).catch(() => {});
     }
 
-    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR (RESTAURADO Y PAUSABLE)
+    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR
     async function startCameraOCR() {
         document.getElementById('ocr-viewport').style.display = 'block';
         try {
@@ -804,13 +829,11 @@
                 const cleaned = w.replace(/[^A-Z0-9]/g, '');
                 const candidate = normalizeOcrCandidate(cleaned);
                 
-                // Si la BD contiene el candidato, validamos y PAUSAMOS visualmente
                 if (candidate && BASE_M_CODES.has(candidate)) {
                     if (cleaned !== candidate && candidate === expectedIdCliente) {
                         saveOcrLearningToFirebase(cleaned, candidate, currentThreshold);
                     }
                     if (!paused) { 
-                        // Congelar visualmente la lectura
                         videoElem.pause(); 
                         const ocrLiveRead = document.getElementById('ocr-live-read');
                         ocrLiveRead.innerText = `DETECTADO: ${candidate}`;
@@ -865,7 +888,7 @@
         updateUIForStep();
     });
 
-    // 7. MANEJO DE INTENTOS Y BLOQUEO CON RETRASO CONTRA DOBLES LECTURAS
+    // 7. MANEJO DE INTENTOS Y BLOQUEO
     function handleStepFailure(lockReason, statusText) {
         retryCount++;
         document.getElementById('retry-counter').innerText = `Intentos: ${retryCount}/5`;
