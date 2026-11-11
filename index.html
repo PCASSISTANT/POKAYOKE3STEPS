@@ -85,7 +85,7 @@
         font-weight: 600;
     }
 
-    /* BARRITAS DE PROGRESO */
+    /* BARRITAS DE PROGRESO (MODIFICADAS A VERDE) */
     .progress-container {
         display: flex;
         gap: 8px;
@@ -163,6 +163,7 @@
     }
     .btn-green { background-color: var(--green-ok); }
 
+    /* NUEVO DISEÑO PARA INDICADOR DE BOTÓN FÍSICO (YA NO ES BOTÓN) */
     .scanner-indicator {
         display: flex;
         align-items: center;
@@ -179,23 +180,12 @@
         text-align: center;
     }
 
+    /* INTENTOS */
     .intentos-text {
         text-align: center;
         color: var(--text-muted);
         font-size: 14px;
         font-weight: 700;
-    }
-
-    /* ESTILOS DE INPUT OCULTO SEGURO */
-    .scanner-input-hidden {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        border: 0;
     }
 
     /* ELEMENTOS DEL PASO 3 Y 4 */
@@ -324,27 +314,31 @@
     <div class="workspace">
         
         <!-- RECEPTOR OCULTO ZEBRA -->
-        <input type="text" id="zebra-wedge-input" inputmode="none" autocomplete="off" class="scanner-input-hidden">
+        <input type="text" id="zebra-wedge-input" inputmode="none" autocomplete="off" style="position:fixed; top:-100px; left:-100px; opacity:0;">
 
         <!-- ÁREA CENTRAL DE ESCANEO -->
         <div class="scan-box-dashed" id="scan-container">
             <div id="msg-pop">ERROR DE LECTURA</div>
             
+            <!-- Texto para pasos -->
             <h2 id="main-prompt" class="scan-prompt-text">ESPERANDO ESCANEO...</h2>
             <div id="sub-prompt" class="scan-sub-text"></div>
 
+            <!-- Cámara para paso 3 -->
             <div id="ocr-viewport">
                 <div id="ocr-live-read" class="ocr-raw-live">BUSCANDO KANBAN DE CLIENTE...</div>
                 <video id="webcam" autoplay playsinline webkit-playsinline muted></video>
                 <div class="ocr-reticle"></div>
             </div>
 
+            <!-- Interfaz Tekin para paso 4 -->
             <div id="step4-container" style="display:none; width:100%; flex-direction:column; align-items:center;">
                 <img id="img-tekin" class="img-verify" alt="Referencia Tekin">
                 <div id="options-area" class="tekin-options"></div>
             </div>
         </div>
 
+        <!-- CONTROLES INFERIORES: INDICADOR DE ESCÁNER FÍSICO REDISEÑADO -->
         <div id="btn-manual-trigger" class="scanner-indicator">
             <span>📡</span> ESPERANDO ESCÁNER FÍSICO
         </div>
@@ -534,6 +528,7 @@
         document.getElementById('btn-finish').style.display = 'none';
         paused = false;
 
+        // Reset visual de OCR
         ocrLiveRead.innerText = "BUSCANDO KANBAN DE CLIENTE...";
         ocrLiveRead.classList.remove('ocr-detected');
 
@@ -562,65 +557,30 @@
         }
     }
 
-    function focusHardwareScanner() { 
-        document.getElementById('zebra-wedge-input').focus(); 
-    }
-
-    // ==========================================
-    // SECCIÓN MODIFICADA: LECTURA UNIVERSAL TC22
-    // ==========================================
-    const wedgeInput = document.getElementById('zebra-wedge-input');
+    function focusHardwareScanner() { document.getElementById('zebra-wedge-input').focus(); }
     
-    // Función central para enviar el código a validación
-    function triggerBarcodeProcess(val) {
-        val = val.trim();
-        wedgeInput.value = ""; // Limpiamos input de inmediato
-        if (val && !paused && (step === 1 || step === 2)) {
-            processFound(val);
-        }
-    }
-
-    // Método 1: Cuando el DataWedge envía la tecla "Enter" o "Tab" explícitamente
+    // Captura del Wedge (Zebra) restaurada con TAB y ENTER
+    const wedgeInput = document.getElementById('zebra-wedge-input');
     wedgeInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.keyCode === 13 || e.keyCode === 9) {
             e.preventDefault();
-            triggerBarcodeProcess(wedgeInput.value);
-        }
-    });
-
-    // Método 2: Cuando el TC22 inyecta el código como texto pegado (Paste/Input) y NO envía Enter
-    let inputTimeout;
-    wedgeInput.addEventListener('input', (e) => {
-        clearTimeout(inputTimeout);
-        // Si no hay más cambios en 400ms y hay texto válido, lo procesamos
-        inputTimeout = setTimeout(() => {
-            const currentVal = wedgeInput.value.trim();
-            if (currentVal.length > 2) { 
-                triggerBarcodeProcess(currentVal);
+            const val = wedgeInput.value.trim();
+            wedgeInput.value = "";
+            if (val && !paused && (step === 1 || step === 2)) {
+                processFound(val);
             }
-        }, 400); 
-    });
-
-    // MANTENER EL FOCO: Si el usuario toca fuera, recuperamos el input
-    wedgeInput.addEventListener('blur', () => {
-        if (user && (step === 1 || step === 2) && !paused) {
-            setTimeout(() => {
-                const active = document.activeElement;
-                if (active && active.tagName !== 'BUTTON' && active.tagName !== 'INPUT') {
-                    wedgeInput.focus();
-                }
-            }, 100);
         }
     });
 
-    // Método 3: Buffer Global para escáneres que actúan como teclados rápidos ignorando inputs
+    // Captura Global para ráfagas (Restaurada exactamente como el 2do código)
     let keyBuffer = "", keyTimer = null;
     window.addEventListener('keydown', (e) => {
         const activeId = document.activeElement ? document.activeElement.id : "";
 
         if (!user) {
             if ((e.key === 'Enter' || e.keyCode === 13) && (activeId === 'nom-input' || activeId === 'pin-input')) {
-                e.preventDefault(); checkLogin();
+                e.preventDefault();
+                checkLogin();
             }
             return;
         }
@@ -630,8 +590,10 @@
             return;
         }
 
+        // Permitir avanzar con botón físico (gatillo Zebra) si el paso fue validado
         if (paused && (e.key === 'Enter' || e.keyCode === 13) && document.getElementById('btn-res').style.display === 'block') {
-            e.preventDefault(); document.getElementById('btn-res').click();
+            e.preventDefault();
+            document.getElementById('btn-res').click();
             return;
         }
 
@@ -646,7 +608,7 @@
         } else if (e.key.length === 1) {
             keyBuffer += e.key;
             clearTimeout(keyTimer);
-            keyTimer = setTimeout(() => { keyBuffer = ""; }, 800); 
+            keyTimer = setTimeout(() => { keyBuffer = ""; }, 400);
         }
     });
 
@@ -719,6 +681,7 @@
             });
 
             if (validRow) {
+                // Pausar unos instantes para que se vea el freeze de pantalla verde
                 setTimeout(() => {
                     stopCameraOCR();
                     getDoc(doc(db, "Maestro_Partes", idCliente))
@@ -732,7 +695,7 @@
                     document.getElementById('btn-res').style.display = 'block';
                     
                     logToDB("OK", "Paso 3: ID Cliente OK");
-                }, 800); 
+                }, 800); // 800ms de visualización antes de ocultar la cámara
             } else {
                 handleStepFailure("ID CLIENTE INCORRECTO", "ID Cliente no coincide con Registro. Reintentando...");
             }
@@ -751,7 +714,7 @@
         }).catch(() => {});
     }
 
-    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR
+    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR (RESTAURADO Y PAUSABLE)
     async function startCameraOCR() {
         document.getElementById('ocr-viewport').style.display = 'block';
         try {
@@ -841,11 +804,13 @@
                 const cleaned = w.replace(/[^A-Z0-9]/g, '');
                 const candidate = normalizeOcrCandidate(cleaned);
                 
+                // Si la BD contiene el candidato, validamos y PAUSAMOS visualmente
                 if (candidate && BASE_M_CODES.has(candidate)) {
                     if (cleaned !== candidate && candidate === expectedIdCliente) {
                         saveOcrLearningToFirebase(cleaned, candidate, currentThreshold);
                     }
                     if (!paused) { 
+                        // Congelar visualmente la lectura
                         videoElem.pause(); 
                         const ocrLiveRead = document.getElementById('ocr-live-read');
                         ocrLiveRead.innerText = `DETECTADO: ${candidate}`;
@@ -900,7 +865,7 @@
         updateUIForStep();
     });
 
-    // 7. MANEJO DE INTENTOS Y BLOQUEO
+    // 7. MANEJO DE INTENTOS Y BLOQUEO CON RETRASO CONTRA DOBLES LECTURAS
     function handleStepFailure(lockReason, statusText) {
         retryCount++;
         document.getElementById('retry-counter').innerText = `Intentos: ${retryCount}/5`;
