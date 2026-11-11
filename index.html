@@ -85,7 +85,7 @@
         font-weight: 600;
     }
 
-    /* BARRITAS DE PROGRESO (MODIFICADAS A VERDE) */
+    /* BARRITAS DE PROGRESO */
     .progress-container {
         display: flex;
         gap: 8px;
@@ -163,7 +163,6 @@
     }
     .btn-green { background-color: var(--green-ok); }
 
-    /* NUEVO DISEÑO PARA INDICADOR DE BOTÓN FÍSICO (YA NO ES BOTÓN) */
     .scanner-indicator {
         display: flex;
         align-items: center;
@@ -180,12 +179,24 @@
         text-align: center;
     }
 
-    /* INTENTOS */
     .intentos-text {
         text-align: center;
         color: var(--text-muted);
         font-size: 14px;
         font-weight: 700;
+    }
+
+    /* ESTILOS DE INPUT OCULTO SEGURO (NUEVO) */
+    /* ESTILOS DE INPUT OCULTO SEGURO */
+    .scanner-input-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
     }
 
     /* ELEMENTOS DEL PASO 3 Y 4 */
@@ -228,7 +239,7 @@
         background: rgba(16, 185, 129, 0.95);
         color: white;
     }
-    
+
     .img-verify {
         width: 100%;
         height: 140px;
@@ -296,7 +307,7 @@
 
 <!-- VISTA 2: FLUJO DE ESCANEO -->
 <div id="ui-scan" style="display:none; flex-direction:column; height:100%;">
-    
+
     <!-- HEADER -->
     <div class="scan-header">
         <h1 id="header-step-title" class="step-title">PASO 1: JAMAITA</h1>
@@ -312,14 +323,15 @@
     </div>
 
     <div class="workspace">
-        
+
+        <!-- RECEPTOR OCULTO ZEBRA (MODIFICADO PARA TC22) -->
         <!-- RECEPTOR OCULTO ZEBRA -->
-        <input type="text" id="zebra-wedge-input" inputmode="none" autocomplete="off" style="position:fixed; top:-100px; left:-100px; opacity:0;">
+        <input type="text" id="zebra-wedge-input" inputmode="none" autocomplete="off" class="scanner-input-hidden">
 
         <!-- ÁREA CENTRAL DE ESCANEO -->
         <div class="scan-box-dashed" id="scan-container">
             <div id="msg-pop">ERROR DE LECTURA</div>
-            
+
             <!-- Texto para pasos -->
             <h2 id="main-prompt" class="scan-prompt-text">ESPERANDO ESCANEO...</h2>
             <div id="sub-prompt" class="scan-sub-text"></div>
@@ -338,11 +350,11 @@
             </div>
         </div>
 
-        <!-- CONTROLES INFERIORES: INDICADOR DE ESCÁNER FÍSICO REDISEÑADO -->
+        <!-- CONTROLES INFERIORES -->
         <div id="btn-manual-trigger" class="scanner-indicator">
             <span>📡</span> ESPERANDO ESCÁNER FÍSICO
         </div>
-        
+
         <button id="btn-res" class="btn-blue-large btn-green" style="display:none;">CONTINUAR AL SIGUIENTE PASO</button>
         <button id="btn-finish" class="btn-blue-large btn-green" style="display:none;">FINALIZAR PIEZA</button>
 
@@ -376,7 +388,7 @@
     const app = initializeApp(firebaseConfig);
     const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
     const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1GkWY2r-kz_wfv_-LPEeFEdKe1qNILTV86pln2xg_rIM/gviz/tq?tqx=out:csv";
-    
+
     const BASE_M_CODES = new Set([
         "M452","M300","M976","M776","M270","M561","M012","M387","M250","M971",
         "M051","M124","M279","M981","M342","M463","M556","M645","M788","M837",
@@ -394,7 +406,7 @@
     let sheetData = [], usersCache = {}, ocrTrainingMap = {};
     let learnedThresholds = [125, 105, 145];
     let thresholdIdx = 0;
-    
+
     let user = null, step = 1, jamaita = "", kanbanParte = "", idCliente = "", expectedIdCliente = "", pendingData = null, retryCount = 0, paused = false;
     let ocrWorker = null, ocrTimer = null, isOcrBusy = false, videoStream = null;
     let lastRawOcrToken = "";
@@ -462,7 +474,7 @@
             nomInput.focus();
             return;
         }
-        
+
         btnLogin.disabled = true;
         btnLogin.innerText = "VALIDANDO...";
 
@@ -471,7 +483,7 @@
             if (s.exists()) {
                 const u = s.data();
                 const nivelNorm = String(u.nivel || "").trim().toLowerCase();
-                
+
                 if (nivelNorm === "operador") {
                     startSession(u);
                 } else {
@@ -491,7 +503,7 @@
                 msgEl.innerText = `La nómina "${nom}" no existe en la base.`;
             }
         } catch(e) { msgEl.innerText = "Error de red al validar usuario."; }
-        
+
         btnLogin.disabled = false;
         btnLogin.innerText = "INGRESAR";
     }
@@ -518,7 +530,7 @@
         const ocrView = document.getElementById('ocr-viewport');
         const step4View = document.getElementById('step4-container');
         const ocrLiveRead = document.getElementById('ocr-live-read');
-        
+
         ocrView.style.display = 'none';
         step4View.style.display = 'none';
         mainPrompt.style.display = 'block';
@@ -557,10 +569,27 @@
         }
     }
 
-    function focusHardwareScanner() { document.getElementById('zebra-wedge-input').focus(); }
+    function focusHardwareScanner() { 
+        document.getElementById('zebra-wedge-input').focus(); 
+    }
     
     // Captura del Wedge (Zebra) restaurada con TAB y ENTER
+
+    // ==========================================
+    // SECCIÓN MODIFICADA: LECTURA UNIVERSAL TC22
+    // ==========================================
     const wedgeInput = document.getElementById('zebra-wedge-input');
+    
+    // Función central para enviar el código a validación
+    function triggerBarcodeProcess(val) {
+        val = val.trim();
+        wedgeInput.value = ""; // Limpiamos input de inmediato
+        if (val && !paused && (step === 1 || step === 2)) {
+            processFound(val);
+        }
+    }
+
+    // Método 1: Cuando el DataWedge envía la tecla "Enter" o "Tab" explícitamente
     wedgeInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.keyCode === 13 || e.keyCode === 9) {
             e.preventDefault();
@@ -569,10 +598,40 @@
             if (val && !paused && (step === 1 || step === 2)) {
                 processFound(val);
             }
+            triggerBarcodeProcess(wedgeInput.value);
         }
     });
 
-    // Captura Global para ráfagas (Restaurada exactamente como el 2do código)
+    // MANTENER EL FOCO DEL TC22 (NUEVO)
+    // Si el usuario toca la pantalla accidentalmente, el input recupera el foco
+    // Método 2: Cuando el TC22 inyecta el código como texto pegado (Paste/Input) y NO envía Enter
+    let inputTimeout;
+    wedgeInput.addEventListener('input', (e) => {
+        clearTimeout(inputTimeout);
+        // Si no hay más cambios en 400ms y hay texto válido, lo procesamos
+        inputTimeout = setTimeout(() => {
+            const currentVal = wedgeInput.value.trim();
+            if (currentVal.length > 2) { 
+                triggerBarcodeProcess(currentVal);
+            }
+        }, 400); 
+    });
+
+    // MANTENER EL FOCO: Si el usuario toca fuera, recuperamos el input
+    wedgeInput.addEventListener('blur', () => {
+        if (user && (step === 1 || step === 2) && !paused) {
+            setTimeout(() => {
+                const active = document.activeElement;
+                // No robar foco si el usuario está intentando interactuar con inputs reales o botones de error
+                if (active && active.tagName !== 'BUTTON' && active.tagName !== 'INPUT') {
+                    wedgeInput.focus();
+                }
+            }, 100);
+        }
+    });
+
+    // Captura Global para ráfagas 
+    // Método 3: Buffer Global para escáneres que actúan como teclados rápidos ignorando inputs
     let keyBuffer = "", keyTimer = null;
     window.addEventListener('keydown', (e) => {
         const activeId = document.activeElement ? document.activeElement.id : "";
@@ -581,6 +640,7 @@
             if ((e.key === 'Enter' || e.keyCode === 13) && (activeId === 'nom-input' || activeId === 'pin-input')) {
                 e.preventDefault();
                 checkLogin();
+                e.preventDefault(); checkLogin();
             }
             return;
         }
@@ -590,10 +650,10 @@
             return;
         }
 
-        // Permitir avanzar con botón físico (gatillo Zebra) si el paso fue validado
         if (paused && (e.key === 'Enter' || e.keyCode === 13) && document.getElementById('btn-res').style.display === 'block') {
             e.preventDefault();
             document.getElementById('btn-res').click();
+            e.preventDefault(); document.getElementById('btn-res').click();
             return;
         }
 
@@ -608,7 +668,8 @@
         } else if (e.key.length === 1) {
             keyBuffer += e.key;
             clearTimeout(keyTimer);
-            keyTimer = setTimeout(() => { keyBuffer = ""; }, 400);
+            // TIEMPO AUMENTADO A 800ms PARA TC22 (Soluciona corte de código)
+            keyTimer = setTimeout(() => { keyBuffer = ""; }, 800); 
         }
     });
 
@@ -627,7 +688,7 @@
         if (step === 1) {
             jamaita = rawVal;
             const matchH = sheetData.some(row => row[7] && row[7].trim() === jamaita);
-            
+
             if (matchH) {
                 document.getElementById('main-prompt').innerText = `¡JAMAITA OK!`;
                 document.getElementById('sub-prompt').innerText = jamaita;
@@ -658,7 +719,7 @@
                 const cellJ = row[9] ? row[9].trim() : '';
                 return cellH === jamaita && cellJ === kanbanParte;
             });
-            
+
             if (matchedRow) {
                 expectedIdCliente = matchedRow[8] ? matchedRow[8].trim().toUpperCase() : '';
                 document.getElementById('main-prompt').innerText = `¡KANBAN OK!`;
@@ -681,21 +742,20 @@
             });
 
             if (validRow) {
-                // Pausar unos instantes para que se vea el freeze de pantalla verde
                 setTimeout(() => {
                     stopCameraOCR();
                     getDoc(doc(db, "Maestro_Partes", idCliente))
                         .then(s => { pendingData = s.exists() ? s.data() : {}; })
                         .catch(() => { pendingData = {}; });
-                    
+
                     document.getElementById('main-prompt').style.display = 'block';
                     document.getElementById('sub-prompt').style.display = 'block';
                     document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
                     document.getElementById('sub-prompt').innerText = idCliente;
                     document.getElementById('btn-res').style.display = 'block';
-                    
+
                     logToDB("OK", "Paso 3: ID Cliente OK");
-                }, 800); // 800ms de visualización antes de ocultar la cámara
+                }, 800); 
             } else {
                 handleStepFailure("ID CLIENTE INCORRECTO", "ID Cliente no coincide con Registro. Reintentando...");
             }
@@ -714,7 +774,7 @@
         }).catch(() => {});
     }
 
-    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR (RESTAURADO Y PAUSABLE)
+    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR
     async function startCameraOCR() {
         document.getElementById('ocr-viewport').style.display = 'block';
         try {
@@ -803,19 +863,17 @@
             for (let w of tokens) {
                 const cleaned = w.replace(/[^A-Z0-9]/g, '');
                 const candidate = normalizeOcrCandidate(cleaned);
-                
-                // Si la BD contiene el candidato, validamos y PAUSAMOS visualmente
+
                 if (candidate && BASE_M_CODES.has(candidate)) {
                     if (cleaned !== candidate && candidate === expectedIdCliente) {
                         saveOcrLearningToFirebase(cleaned, candidate, currentThreshold);
                     }
                     if (!paused) { 
-                        // Congelar visualmente la lectura
                         videoElem.pause(); 
                         const ocrLiveRead = document.getElementById('ocr-live-read');
                         ocrLiveRead.innerText = `DETECTADO: ${candidate}`;
                         ocrLiveRead.classList.add('ocr-detected');
-                        
+
                         processFound(candidate); 
                         break; 
                     }
@@ -841,7 +899,7 @@
 
         const area = document.getElementById('options-area');
         area.innerHTML = "";
-        
+
         opts.forEach(o => {
             const b = document.createElement('button');
             b.className = "option-btn";
@@ -865,11 +923,11 @@
         updateUIForStep();
     });
 
-    // 7. MANEJO DE INTENTOS Y BLOQUEO CON RETRASO CONTRA DOBLES LECTURAS
+    // 7. MANEJO DE INTENTOS Y BLOQUEO
     function handleStepFailure(lockReason, statusText) {
         retryCount++;
         document.getElementById('retry-counter').innerText = `Intentos: ${retryCount}/5`;
-        
+
         if (retryCount >= 5) {
             logToDB("NG", "EXCESO DE INTENTOS: " + lockReason);
             document.getElementById('lock-msg').innerText = lockReason;
