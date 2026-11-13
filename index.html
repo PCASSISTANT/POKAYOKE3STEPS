@@ -296,7 +296,7 @@
 <!-- VISTA 1: LOGIN -->
 <div id="ui-login" class="login-container">
     <h2 style="text-align:center; color:var(--green-ok); margin-bottom: 30px;">KTMEX POKA-YOKE</h2>
-    <input type="text" id="nom-input" class="input-box" placeholder="ESCRIBIR O ESCANEAR NÓMINA" autocomplete="off">
+    <input type="text" id="nom-input" class="input-box" placeholder="ESCRIBIR O ESCANEAR NÓMINA" autocomplete="off" autofocus>
     <div id="pin-box" style="display:none;">
         <input type="password" id="pin-input" class="input-box" placeholder="PIN DE LÍDER" autocomplete="off">
     </div>
@@ -569,10 +569,36 @@
     }
 
     function focusHardwareScanner() { 
-        document.getElementById('zebra-wedge-input').focus(); 
+        const wedge = document.getElementById('zebra-wedge-input');
+        if (wedge) wedge.focus(); 
     }
-    
-    // Captura del Wedge (Zebra) restaurada con TAB y ENTER
+
+    // ==========================================
+    // GUARDIÁN DE FOCO AUTOMÁTICO (NUEVO)
+    // Evita que el usuario tenga que tocar la pantalla
+    // ==========================================
+    setInterval(() => {
+        const active = document.activeElement;
+        
+        if (!user) {
+            // Pantalla de Login
+            if (!active || (active.id !== 'nom-input' && active.id !== 'pin-input' && active.tagName !== 'BUTTON')) {
+                const pinBox = document.getElementById('pin-box');
+                if (pinBox && pinBox.style.display === 'none') {
+                    document.getElementById('nom-input').focus();
+                } else if (pinBox) {
+                    document.getElementById('pin-input').focus();
+                }
+            }
+        } else {
+            // Pantalla de Escaneo (Pasos 1 y 2)
+            if ((step === 1 || step === 2) && !paused) {
+                if (!active || (active.id !== 'zebra-wedge-input' && active.id !== 'pin-tl' && active.tagName !== 'BUTTON')) {
+                    focusHardwareScanner();
+                }
+            }
+        }
+    }, 500);
 
     // ==========================================
     // SECCIÓN MODIFICADA: LECTURA UNIVERSAL TC22
@@ -601,13 +627,10 @@
         }
     });
 
-    // MANTENER EL FOCO DEL TC22 (NUEVO)
-    // Si el usuario toca la pantalla accidentalmente, el input recupera el foco
-    // Método 2: Cuando el TC22 inyecta el código como texto pegado (Paste/Input) y NO envía Enter
+    // MANTENER EL FOCO DEL TC22
     let inputTimeout;
     wedgeInput.addEventListener('input', (e) => {
         clearTimeout(inputTimeout);
-        // Si no hay más cambios en 400ms y hay texto válido, lo procesamos
         inputTimeout = setTimeout(() => {
             const currentVal = wedgeInput.value.trim();
             if (currentVal.length > 2) { 
@@ -616,21 +639,7 @@
         }, 400); 
     });
 
-    // MANTENER EL FOCO: Si el usuario toca fuera, recuperamos el input
-    wedgeInput.addEventListener('blur', () => {
-        if (user && (step === 1 || step === 2) && !paused) {
-            setTimeout(() => {
-                const active = document.activeElement;
-                // No robar foco si el usuario está intentando interactuar con inputs reales o botones de error
-                if (active && active.tagName !== 'BUTTON' && active.tagName !== 'INPUT') {
-                    wedgeInput.focus();
-                }
-            }, 100);
-        }
-    });
-
     // Captura Global para ráfagas 
-    // Método 3: Buffer Global para escáneres que actúan como teclados rápidos ignorando inputs
     let keyBuffer = "", keyTimer = null;
     window.addEventListener('keydown', (e) => {
         const activeId = document.activeElement ? document.activeElement.id : "";
@@ -667,12 +676,18 @@
         } else if (e.key.length === 1) {
             keyBuffer += e.key;
             clearTimeout(keyTimer);
-            // TIEMPO AUMENTADO A 800ms PARA TC22 (Soluciona corte de código)
             keyTimer = setTimeout(() => { keyBuffer = ""; }, 800); 
         }
     });
 
+    // Recuperar foco al tocar la pantalla (clic o touch)
     document.addEventListener('click', (e) => {
+        if (user && (step === 1 || step === 2) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
+            focusHardwareScanner();
+        }
+    });
+
+    document.addEventListener('touchstart', (e) => {
         if (user && (step === 1 || step === 2) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
             focusHardwareScanner();
         }
@@ -694,7 +709,7 @@
                 document.getElementById('btn-manual-trigger').style.display = 'none';
                 
                 logToDB("OK", "Paso 1: Jamaita QR Detectada");
-                setTimeout(() => { step++; updateUIForStep(); }, 200); // AVANCE MÁXIMA VELOCIDAD
+                setTimeout(() => { step++; updateUIForStep(); }, 200); 
             } else {
                 handleStepFailure("SEBANGO NO ENCONTRADO EN BD", "Sebango no registrado. Reintentando...");
             }
@@ -727,7 +742,7 @@
                 document.getElementById('btn-manual-trigger').style.display = 'none';
 
                 logToDB("OK", "Paso 2: Kanban Parte OK");
-                setTimeout(() => { step++; updateUIForStep(); }, 200); // AVANCE MÁXIMA VELOCIDAD
+                setTimeout(() => { step++; updateUIForStep(); }, 200); 
             } else {
                 handleStepFailure("MEZCLA DE PARTE / SEBANGO", "Número de Parte no coincide con Sebango. Reintentando...");
             }
@@ -744,7 +759,6 @@
 
             if (validRow) {
                 stopCameraOCR();
-                // Consulta en paralelo para que no retrase el UI
                 getDoc(doc(db, "Maestro_Partes", idCliente))
                     .then(s => { pendingData = s.exists() ? s.data() : {}; })
                     .catch(() => { pendingData = {}; });
@@ -755,9 +769,8 @@
                 document.getElementById('sub-prompt').innerText = idCliente;
 
                 logToDB("OK", "Paso 3: ID Cliente OK");
-                setTimeout(() => { step++; updateUIForStep(); }, 250); // AVANCE MÁXIMA VELOCIDAD OCR
+                setTimeout(() => { step++; updateUIForStep(); }, 250);
             } else {
-                // AHORA SÍ LE DA SUS 5 INTENTOS SIN BLOQUEARSE
                 handleStepFailure("ID CLIENTE INCORRECTO", "Lectura de Cliente incorrecta. Reintentando...");
             }
         }
@@ -914,7 +927,7 @@
                         step = 1; retryCount = 0; jamaita = ""; kanbanParte = ""; idCliente = ""; pendingData = null;
                         document.getElementById('retry-counter').innerText = `Intentos: 0/5`;
                         updateUIForStep();
-                    }, 400); // FINALIZA Y REINICIA RAPIDÍSIMO
+                    }, 400); 
                 } else {
                     handleStepFailure("ERROR SELECCIÓN TEKIN", "Validación Tekin fallida.");
                 }
@@ -946,10 +959,9 @@
             setTimeout(() => {
                 pop.style.display = 'none';
                 
-                // Si el error fue en OCR (Paso 3), reiniciamos visual y la cámara vuelve a reproducirse
                 if (step === 3) {
                     const v = document.getElementById('webcam');
-                    if (v && v.paused) v.play(); // Esto arregla que la cámara se quede trabada
+                    if (v && v.paused) v.play(); 
                     
                     const ocrLiveRead = document.getElementById('ocr-live-read');
                     if (ocrLiveRead) {
@@ -960,7 +972,7 @@
                 
                 paused = false;
                 if(step === 1 || step === 2) focusHardwareScanner();
-            }, 1200); // Reduce ligeramente el tiempo de espera por fallo para agilizar el proceso
+            }, 1200); 
         }
     }
 
