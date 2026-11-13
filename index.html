@@ -187,7 +187,6 @@
     }
 
     /* ESTILOS DE INPUT OCULTO SEGURO (NUEVO) */
-    /* ESTILOS DE INPUT OCULTO SEGURO */
     .scanner-input-hidden {
         position: absolute;
         width: 1px;
@@ -324,7 +323,6 @@
 
     <div class="workspace">
 
-        <!-- RECEPTOR OCULTO ZEBRA (MODIFICADO PARA TC22) -->
         <!-- RECEPTOR OCULTO ZEBRA -->
         <input type="text" id="zebra-wedge-input" inputmode="none" autocomplete="off" class="scanner-input-hidden">
 
@@ -355,6 +353,7 @@
             <span>📡</span> ESPERANDO ESCÁNER FÍSICO
         </div>
 
+        <!-- Estos botones ya no se muestran por el avance automático, pero se mantienen para evitar romper eventos de teclado viejos -->
         <button id="btn-res" class="btn-blue-large btn-green" style="display:none;">CONTINUAR AL SIGUIENTE PASO</button>
         <button id="btn-finish" class="btn-blue-large btn-green" style="display:none;">FINALIZAR PIEZA</button>
 
@@ -693,8 +692,9 @@
                 document.getElementById('main-prompt').innerText = `¡JAMAITA OK!`;
                 document.getElementById('sub-prompt').innerText = jamaita;
                 document.getElementById('btn-manual-trigger').style.display = 'none';
-                document.getElementById('btn-res').style.display = 'block';
+                
                 logToDB("OK", "Paso 1: Jamaita QR Detectada");
+                setTimeout(() => { step++; updateUIForStep(); }, 1000); // AVANCE AUTOMÁTICO
             } else {
                 handleStepFailure("SEBANGO NO ENCONTRADO EN BD", "Sebango no registrado. Reintentando...");
             }
@@ -725,8 +725,9 @@
                 document.getElementById('main-prompt').innerText = `¡KANBAN OK!`;
                 document.getElementById('sub-prompt').innerText = kanbanParte;
                 document.getElementById('btn-manual-trigger').style.display = 'none';
-                document.getElementById('btn-res').style.display = 'block';
+
                 logToDB("OK", "Paso 2: Kanban Parte OK");
+                setTimeout(() => { step++; updateUIForStep(); }, 1000); // AVANCE AUTOMÁTICO
             } else {
                 handleStepFailure("MEZCLA DE PARTE / SEBANGO", "Número de Parte no coincide con Sebango. Reintentando...");
             }
@@ -752,12 +753,14 @@
                     document.getElementById('sub-prompt').style.display = 'block';
                     document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
                     document.getElementById('sub-prompt').innerText = idCliente;
-                    document.getElementById('btn-res').style.display = 'block';
 
                     logToDB("OK", "Paso 3: ID Cliente OK");
+                    setTimeout(() => { step++; updateUIForStep(); }, 1000); // AVANCE AUTOMÁTICO
                 }, 800); 
             } else {
-                handleStepFailure("ID CLIENTE INCORRECTO", "ID Cliente no coincide con Registro. Reintentando...");
+                stopCameraOCR(); // Detiene la cámara inmediatamente para que no se trabe
+                retryCount = 4; // Fuerza a que el intento actual cuente como el 5to y active el bloqueo
+                handleStepFailure("ID CLIENTE INCORRECTO", "Lectura OCR incorrecta. Bloqueo de seguridad.");
             }
         }
     }
@@ -907,8 +910,13 @@
             b.onclick = () => {
                 if(o === t_ok) {
                     area.innerHTML = "<h3 style='color:#10b981; grid-column:span 2; text-align:center;'>VALIDADO CORRECTAMENTE</h3>";
-                    document.getElementById('btn-finish').style.display = 'flex';
+                    
                     logToDB("OK", "Paso 4: Tekin Verificado");
+                    setTimeout(() => {
+                        step = 1; retryCount = 0; jamaita = ""; kanbanParte = ""; idCliente = ""; pendingData = null;
+                        document.getElementById('retry-counter').innerText = `Intentos: 0/5`;
+                        updateUIForStep();
+                    }, 1500); // FINALIZA Y REINICIA AUTOMÁTICAMENTE
                 } else {
                     handleStepFailure("ERROR SELECCIÓN TEKIN", "Validación Tekin fallida.");
                 }
