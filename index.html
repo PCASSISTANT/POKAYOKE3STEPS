@@ -186,7 +186,7 @@
         font-weight: 700;
     }
 
-    /* ESTILOS DE INPUT OCULTO SEGURO */
+    /* ESTILOS DE INPUT OCULTO SEGURO (NUEVO) */
     .scanner-input-hidden {
         position: absolute;
         width: 1px;
@@ -289,19 +289,6 @@
         justify-content: center;
         padding: 20px;
     }
-    
-    /* Overlay para indicar que está procesando OCR */
-    #ocr-processing-overlay {
-        position: absolute;
-        inset: 0;
-        background: rgba(0,0,0,0.7);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        font-weight: bold;
-        z-index: 20;
-    }
 </style>
 </head>
 <body>
@@ -349,10 +336,9 @@
 
             <!-- Cámara para paso 3 -->
             <div id="ocr-viewport">
-                <div id="ocr-live-read" class="ocr-raw-live">APUNTE AL KANBAN Y DISPARE...</div>
+                <div id="ocr-live-read" class="ocr-raw-live">BUSCANDO KANBAN DE CLIENTE...</div>
                 <video id="webcam" autoplay playsinline webkit-playsinline muted></video>
                 <div class="ocr-reticle"></div>
-                <div id="ocr-processing-overlay">ANALIZANDO IMAGEN...</div>
             </div>
 
             <!-- Interfaz Tekin para paso 4 -->
@@ -364,7 +350,7 @@
 
         <!-- CONTROLES INFERIORES -->
         <div id="btn-manual-trigger" class="scanner-indicator">
-            <span id="scanner-icon">📡</span> <span id="scanner-text">ESPERANDO ESCÁNER FÍSICO</span>
+            <span>📡</span> ESPERANDO ESCÁNER FÍSICO
         </div>
 
         <!-- Botones ocultos por avance automático -->
@@ -421,7 +407,8 @@
     let thresholdIdx = 0;
 
     let user = null, step = 1, jamaita = "", kanbanParte = "", idCliente = "", expectedIdCliente = "", pendingData = null, retryCount = 0, paused = false;
-    let ocrWorker = null, isOcrBusy = false, videoStream = null;
+    let ocrWorker = null, ocrTimer = null, isOcrBusy = false, videoStream = null;
+    let lastRawOcrToken = "";
 
     const roiCanvas = document.createElement('canvas');
     roiCanvas.width = 260; roiCanvas.height = 80;
@@ -448,7 +435,7 @@
                 await ocrWorker.initialize('eng');
                 await ocrWorker.setParameters({
                     tessedit_char_whitelist: 'M0123456789OISBZGHAENWQDTL',
-                    tessedit_pageseg_mode: '7' // Treat image as a single text line
+                    tessedit_pageseg_mode: '7'
                 });
             }
         } catch(e) { console.warn("Tesseract no cargó, se usará Tesseract.recognize directo"); }
@@ -542,8 +529,6 @@
         const ocrView = document.getElementById('ocr-viewport');
         const step4View = document.getElementById('step4-container');
         const ocrLiveRead = document.getElementById('ocr-live-read');
-        const scannerText = document.getElementById('scanner-text');
-        const scannerIcon = document.getElementById('scanner-icon');
 
         ocrView.style.display = 'none';
         step4View.style.display = 'none';
@@ -552,35 +537,28 @@
         document.getElementById('btn-manual-trigger').style.display = 'flex';
         document.getElementById('btn-res').style.display = 'none';
         document.getElementById('btn-finish').style.display = 'none';
-        document.getElementById('ocr-processing-overlay').style.display = 'none';
         paused = false;
 
         // Reset visual de OCR
-        ocrLiveRead.innerText = "APUNTE AL KANBAN Y DISPARE...";
+        ocrLiveRead.innerText = "BUSCANDO KANBAN DE CLIENTE...";
         ocrLiveRead.classList.remove('ocr-detected');
 
         if(step === 1) {
             title.innerText = "PASO 1: JAMAITA";
             mainPrompt.innerText = "ESPERANDO ESCANEO...";
             subPrompt.innerText = "Escanea la etiqueta Jamaita/Sebango";
-            scannerText.innerText = "ESPERANDO ESCÁNER FÍSICO";
-            scannerIcon.innerText = "📡";
             focusHardwareScanner();
         } else if(step === 2) {
             title.innerText = "PASO 2: KANBAN";
             mainPrompt.innerText = "ESPERANDO KANBAN...";
             subPrompt.innerText = `JAMAITA ACTUAL: ${jamaita}`;
-            scannerText.innerText = "ESPERANDO ESCÁNER FÍSICO";
-            scannerIcon.innerText = "📡";
             focusHardwareScanner();
         } else if(step === 3) {
             title.innerText = "PASO 3: ID CLIENTE";
             mainPrompt.style.display = 'none';
             subPrompt.style.display = 'none';
-            scannerText.innerText = "PRESIONE EL GATILLO PARA ANALIZAR";
-            scannerIcon.innerText = "📸";
-            startCameraForSnapshot(); // Encendemos la cámara pero no procesamos en bucle
-            focusHardwareScanner(); // Mantenemos el foco para interceptar el gatillo
+            document.getElementById('btn-manual-trigger').style.display = 'none';
+            startCameraOCR();
         } else if(step === 4) {
             title.innerText = "PASO 4: TEKIN";
             mainPrompt.style.display = 'none';
@@ -596,12 +574,14 @@
     }
 
     // ==========================================
-    // GUARDIÁN DE FOCO AUTOMÁTICO
+    // GUARDIÁN DE FOCO AUTOMÁTICO (NUEVO)
+    // Evita que el usuario tenga que tocar la pantalla
     // ==========================================
     setInterval(() => {
         const active = document.activeElement;
         
         if (!user) {
+            // Pantalla de Login
             if (!active || (active.id !== 'nom-input' && active.id !== 'pin-input' && active.tagName !== 'BUTTON')) {
                 const pinBox = document.getElementById('pin-box');
                 if (pinBox && pinBox.style.display === 'none') {
@@ -611,8 +591,8 @@
                 }
             }
         } else {
-            // Mantenemos el foco en los 3 primeros pasos
-            if ((step === 1 || step === 2 || step === 3) && !paused) {
+            // Pantalla de Escaneo (Pasos 1 y 2)
+            if ((step === 1 || step === 2) && !paused) {
                 if (!active || (active.id !== 'zebra-wedge-input' && active.id !== 'pin-tl' && active.tagName !== 'BUTTON')) {
                     focusHardwareScanner();
                 }
@@ -621,43 +601,33 @@
     }, 500);
 
     // ==========================================
-    // LECTURA UNIVERSAL TC22
+    // SECCIÓN MODIFICADA: LECTURA UNIVERSAL TC22
     // ==========================================
     const wedgeInput = document.getElementById('zebra-wedge-input');
     
+    // Función central para enviar el código a validación
     function triggerBarcodeProcess(val) {
         val = val.trim();
-        wedgeInput.value = ""; 
-        if (val && !paused) {
-            if (step === 1 || step === 2) {
-                processFound(val);
-            } else if (step === 3) {
-                // Si estamos en el paso 3 y el Zebra manda texto (leyó algo por accidente),
-                // o manda una señal vacía (algunos emiten "Enter" al apretar),
-                // disparamos la captura de OCR.
-                takeSnapshotAndRunOCR();
-            }
+        wedgeInput.value = ""; // Limpiamos input de inmediato
+        if (val && !paused && (step === 1 || step === 2)) {
+            processFound(val);
         }
     }
 
-    // Interceptar "Enter" o lecturas
+    // Método 1: Cuando el DataWedge envía la tecla "Enter" o "Tab" explícitamente
     wedgeInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.keyCode === 13 || e.keyCode === 9) {
             e.preventDefault();
             const val = wedgeInput.value.trim();
             wedgeInput.value = "";
-            
-            if (!paused) {
-                if (step === 1 || step === 2) {
-                    if(val) processFound(val);
-                } else if (step === 3) {
-                    // Si apretaron el gatillo en el paso 3, lanzamos el OCR
-                    takeSnapshotAndRunOCR();
-                }
+            if (val && !paused && (step === 1 || step === 2)) {
+                processFound(val);
             }
+            triggerBarcodeProcess(wedgeInput.value);
         }
     });
 
+    // MANTENER EL FOCO DEL TC22
     let inputTimeout;
     wedgeInput.addEventListener('input', (e) => {
         clearTimeout(inputTimeout);
@@ -669,39 +639,39 @@
         }, 400); 
     });
 
-    // Ráfagas
+    // Captura Global para ráfagas 
     let keyBuffer = "", keyTimer = null;
     window.addEventListener('keydown', (e) => {
         const activeId = document.activeElement ? document.activeElement.id : "";
 
         if (!user) {
             if ((e.key === 'Enter' || e.keyCode === 13) && (activeId === 'nom-input' || activeId === 'pin-input')) {
+                e.preventDefault();
+                checkLogin();
                 e.preventDefault(); checkLogin();
             }
             return;
         }
+
         if (activeId === 'pin-tl') {
             if (e.key === 'Enter' || e.keyCode === 13) document.getElementById('btn-unlock').click();
             return;
         }
+
         if (paused && (e.key === 'Enter' || e.keyCode === 13) && document.getElementById('btn-res').style.display === 'block') {
+            e.preventDefault();
+            document.getElementById('btn-res').click();
             e.preventDefault(); document.getElementById('btn-res').click();
             return;
         }
-        if (paused || activeId === 'zebra-wedge-input') return;
+
+        if (paused || (step !== 1 && step !== 2) || activeId === 'zebra-wedge-input') return;
 
         if (e.key === 'Enter' || e.keyCode === 13) {
             if (keyBuffer.trim().length > 0) {
                 const scanned = keyBuffer.trim();
                 keyBuffer = "";
-                if(step === 1 || step === 2) {
-                    processFound(scanned);
-                } else if (step === 3) {
-                    takeSnapshotAndRunOCR();
-                }
-            } else if (step === 3 && keyBuffer.length === 0) {
-                // Enter vacío en paso 3 dispara la foto
-                takeSnapshotAndRunOCR();
+                processFound(scanned);
             }
         } else if (e.key.length === 1) {
             keyBuffer += e.key;
@@ -710,13 +680,15 @@
         }
     });
 
+    // Recuperar foco al tocar la pantalla (clic o touch)
     document.addEventListener('click', (e) => {
-        if (user && (step <= 3) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
+        if (user && (step === 1 || step === 2) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
             focusHardwareScanner();
         }
     });
+
     document.addEventListener('touchstart', (e) => {
-        if (user && (step <= 3) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
+        if (user && (step === 1 || step === 2) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
             focusHardwareScanner();
         }
     });
@@ -735,6 +707,7 @@
                 document.getElementById('main-prompt').innerText = `¡JAMAITA OK!`;
                 document.getElementById('sub-prompt').innerText = jamaita;
                 document.getElementById('btn-manual-trigger').style.display = 'none';
+                
                 logToDB("OK", "Paso 1: Jamaita QR Detectada");
                 setTimeout(() => { step++; updateUIForStep(); }, 200); 
             } else {
@@ -746,9 +719,13 @@
             const parts = rawVal.split('-');
             let parsedPart = rawVal;
 
-            if (parts.length >= 4) { parsedPart = parts.slice(1, -1).join('-'); } 
-            else if (parts.length === 3) { parsedPart = parts[1]; } 
-            else if (rawVal.includes('-')) { parsedPart = rawVal.substring(rawVal.indexOf('-') + 1).trim(); }
+            if (parts.length >= 4) {
+                parsedPart = parts.slice(1, -1).join('-');
+            } else if (parts.length === 3) {
+                parsedPart = parts[1];
+            } else if (rawVal.includes('-')) {
+                parsedPart = rawVal.substring(rawVal.indexOf('-') + 1).trim();
+            }
 
             kanbanParte = parsedPart;
 
@@ -763,16 +740,16 @@
                 document.getElementById('main-prompt').innerText = `¡KANBAN OK!`;
                 document.getElementById('sub-prompt').innerText = kanbanParte;
                 document.getElementById('btn-manual-trigger').style.display = 'none';
+
                 logToDB("OK", "Paso 2: Kanban Parte OK");
                 setTimeout(() => { step++; updateUIForStep(); }, 200); 
             } else {
                 handleStepFailure("MEZCLA DE PARTE / SEBANGO", "Número de Parte no coincide con Sebango. Reintentando...");
             }
         }
-        // PASO 3: ID CLIENTE (Recibe el dato desde el OCR)
+        // PASO 3: ID CLIENTE
         else if (step === 3) {
             idCliente = rawVal.toUpperCase();
-            
             const validRow = sheetData.find(row => {
                 const cellH = row[7] ? row[7].trim() : '';
                 const cellI = row[8] ? row[8].trim().toUpperCase() : '';
@@ -791,7 +768,7 @@
                 document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
                 document.getElementById('sub-prompt').innerText = idCliente;
 
-                logToDB("OK", "Paso 3: ID Cliente OK (OCR Snapshot)");
+                logToDB("OK", "Paso 3: ID Cliente OK");
                 setTimeout(() => { step++; updateUIForStep(); }, 250);
             } else {
                 handleStepFailure("ID CLIENTE INCORRECTO", "Lectura de Cliente incorrecta. Reintentando...");
@@ -811,8 +788,8 @@
         }).catch(() => {});
     }
 
-    // 5. CÁMARA Y OCR "SHOOT-TO-OCR"
-    async function startCameraForSnapshot() {
+    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR
+    async function startCameraOCR() {
         document.getElementById('ocr-viewport').style.display = 'block';
         try {
             videoStream = await navigator.mediaDevices.getUserMedia({ 
@@ -821,7 +798,7 @@
             const videoElem = document.getElementById('webcam');
             videoElem.srcObject = videoStream;
             await videoElem.play();
-            // Ya NO usamos setInterval aquí.
+            ocrTimer = setInterval(runUltraLightOCR, 300);
         } catch(e) { 
             const pop = document.getElementById('msg-pop');
             pop.innerText = "Error accediendo a la cámara.";
@@ -830,9 +807,9 @@
     }
 
     function stopCameraOCR() {
+        if (ocrTimer) { clearInterval(ocrTimer); ocrTimer = null; }
         if(videoStream) { videoStream.getTracks().forEach(t => t.stop()); }
         document.getElementById('ocr-viewport').style.display = 'none';
-        document.getElementById('ocr-processing-overlay').style.display = 'none';
     }
 
     function normalizeOcrCandidate(rawToken) {
@@ -852,15 +829,26 @@
         return /^M\d{3}$/.test(candidate) ? candidate : null;
     }
 
-    async function takeSnapshotAndRunOCR() {
+    function saveOcrLearningToFirebase(rawStr, validTargetCode, usedThreshold) {
+        const cleanRaw = rawStr.replace(/[^A-Z0-9]/g, '').toUpperCase();
+        if (!cleanRaw || cleanRaw === validTargetCode) return;
+        if (ocrTrainingMap[cleanRaw] === validTargetCode) return;
+
+        ocrTrainingMap[cleanRaw] = validTargetCode;
+        try { localStorage.setItem('ktmex_ocr_map', JSON.stringify(ocrTrainingMap)); } catch (e) {}
+
+        setDoc(doc(db, "OCR_Aprendizaje", cleanRaw), {
+            raw: cleanRaw, target: validTargetCode, threshold: usedThreshold,
+            usuario: user ? user.nombre : "Operador", timestamp: serverTimestamp()
+        }).catch(() => {});
+    }
+
+    async function runUltraLightOCR() {
         if (paused || step !== 3 || isOcrBusy) return;
         const videoElem = document.getElementById('webcam');
         if (!videoElem.videoWidth) return;
 
         isOcrBusy = true;
-        paused = true; // Pausamos para que no envíen otro gatillazo
-        document.getElementById('ocr-processing-overlay').style.display = 'flex';
-
         try {
             const vw = videoElem.videoWidth, vh = videoElem.videoHeight;
             const cropW = vw * 0.60, cropH = vh * 0.28;
@@ -869,9 +857,8 @@
             roiCtx.drawImage(videoElem, cropX, cropY, cropW, cropH, 0, 0, roiCanvas.width, roiCanvas.height);
             const imgData = roiCtx.getImageData(0, 0, roiCanvas.width, roiCanvas.height);
             const data = imgData.data;
-            
-            // Usamos un threshold fijo que suele ser confiable para etiquetas blancas con texto negro impreso
-            const currentThreshold = 125; 
+            const currentThreshold = learnedThresholds[thresholdIdx];
+            thresholdIdx = (thresholdIdx + 1) % learnedThresholds.length;
 
             for (let i = 0; i < data.length; i += 4) {
                 const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
@@ -886,45 +873,27 @@
                 recognizedText = res.data.text;
             }
 
-            let foundCandidate = null;
-            
-            // 1. Buscamos primero si leyó el que esperamos
-            if (expectedIdCliente && recognizedText.toUpperCase().includes(expectedIdCliente)) {
-                foundCandidate = expectedIdCliente;
-            } else {
-                // 2. Si no, parseamos tokens buscando un patrón válido
-                const tokens = recognizedText.toUpperCase().split(/[\s\n]+/);
-                for (let w of tokens) {
-                    const cleaned = w.replace(/[^A-Z0-9]/g, '');
-                    const candidate = normalizeOcrCandidate(cleaned);
-                    if (candidate && BASE_M_CODES.has(candidate)) {
-                        foundCandidate = candidate;
-                        break;
+            const tokens = recognizedText.toUpperCase().split(/[\s\n]+/);
+            for (let w of tokens) {
+                const cleaned = w.replace(/[^A-Z0-9]/g, '');
+                const candidate = normalizeOcrCandidate(cleaned);
+
+                if (candidate && BASE_M_CODES.has(candidate)) {
+                    if (cleaned !== candidate && candidate === expectedIdCliente) {
+                        saveOcrLearningToFirebase(cleaned, candidate, currentThreshold);
+                    }
+                    if (!paused) { 
+                        videoElem.pause(); 
+                        const ocrLiveRead = document.getElementById('ocr-live-read');
+                        ocrLiveRead.innerText = `DETECTADO: ${candidate}`;
+                        ocrLiveRead.classList.add('ocr-detected');
+
+                        processFound(candidate); 
+                        break; 
                     }
                 }
             }
-
-            if (foundCandidate) {
-                videoElem.pause(); 
-                const ocrLiveRead = document.getElementById('ocr-live-read');
-                ocrLiveRead.innerText = `DETECTADO: ${foundCandidate}`;
-                ocrLiveRead.classList.add('ocr-detected');
-                document.getElementById('ocr-processing-overlay').style.display = 'none';
-                
-                processFound(foundCandidate); 
-            } else {
-                // Falló la lectura
-                document.getElementById('ocr-processing-overlay').style.display = 'none';
-                handleStepFailure("LECTURA FALLIDA", "No se detectó ID de cliente válido. Dispare de nuevo.");
-            }
-
-        } catch (e) {
-            document.getElementById('ocr-processing-overlay').style.display = 'none';
-            handleStepFailure("ERROR DE CÁMARA", "Error al procesar imagen.");
-        } finally { 
-            isOcrBusy = false; 
-            // Si falló, reactivamos para otro disparo (se hace dentro de handleStepFailure tras un delay)
-        }
+        } catch (e) {} finally { isOcrBusy = false; }
     }
 
     // 6. PASO 4 TEKIN
@@ -996,13 +965,13 @@
                     
                     const ocrLiveRead = document.getElementById('ocr-live-read');
                     if (ocrLiveRead) {
-                        ocrLiveRead.innerText = "APUNTE AL KANBAN Y DISPARE...";
+                        ocrLiveRead.innerText = "BUSCANDO KANBAN DE CLIENTE...";
                         ocrLiveRead.classList.remove('ocr-detected');
                     }
                 }
                 
                 paused = false;
-                if(step <= 3) focusHardwareScanner();
+                if(step === 1 || step === 2) focusHardwareScanner();
             }, 1200); 
         }
     }
