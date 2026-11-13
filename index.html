@@ -353,7 +353,7 @@
             <span>📡</span> ESPERANDO ESCÁNER FÍSICO
         </div>
 
-        <!-- Estos botones ya no se muestran por el avance automático, pero se mantienen para evitar romper eventos de teclado viejos -->
+        <!-- Botones ocultos por avance automático -->
         <button id="btn-res" class="btn-blue-large btn-green" style="display:none;">CONTINUAR AL SIGUIENTE PASO</button>
         <button id="btn-finish" class="btn-blue-large btn-green" style="display:none;">FINALIZAR PIEZA</button>
 
@@ -694,7 +694,7 @@
                 document.getElementById('btn-manual-trigger').style.display = 'none';
                 
                 logToDB("OK", "Paso 1: Jamaita QR Detectada");
-                setTimeout(() => { step++; updateUIForStep(); }, 1000); // AVANCE AUTOMÁTICO
+                setTimeout(() => { step++; updateUIForStep(); }, 200); // AVANCE MÁXIMA VELOCIDAD
             } else {
                 handleStepFailure("SEBANGO NO ENCONTRADO EN BD", "Sebango no registrado. Reintentando...");
             }
@@ -727,7 +727,7 @@
                 document.getElementById('btn-manual-trigger').style.display = 'none';
 
                 logToDB("OK", "Paso 2: Kanban Parte OK");
-                setTimeout(() => { step++; updateUIForStep(); }, 1000); // AVANCE AUTOMÁTICO
+                setTimeout(() => { step++; updateUIForStep(); }, 200); // AVANCE MÁXIMA VELOCIDAD
             } else {
                 handleStepFailure("MEZCLA DE PARTE / SEBANGO", "Número de Parte no coincide con Sebango. Reintentando...");
             }
@@ -743,24 +743,22 @@
             });
 
             if (validRow) {
-                setTimeout(() => {
-                    stopCameraOCR();
-                    getDoc(doc(db, "Maestro_Partes", idCliente))
-                        .then(s => { pendingData = s.exists() ? s.data() : {}; })
-                        .catch(() => { pendingData = {}; });
+                stopCameraOCR();
+                // Consulta en paralelo para que no retrase el UI
+                getDoc(doc(db, "Maestro_Partes", idCliente))
+                    .then(s => { pendingData = s.exists() ? s.data() : {}; })
+                    .catch(() => { pendingData = {}; });
 
-                    document.getElementById('main-prompt').style.display = 'block';
-                    document.getElementById('sub-prompt').style.display = 'block';
-                    document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
-                    document.getElementById('sub-prompt').innerText = idCliente;
+                document.getElementById('main-prompt').style.display = 'block';
+                document.getElementById('sub-prompt').style.display = 'block';
+                document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
+                document.getElementById('sub-prompt').innerText = idCliente;
 
-                    logToDB("OK", "Paso 3: ID Cliente OK");
-                    setTimeout(() => { step++; updateUIForStep(); }, 1000); // AVANCE AUTOMÁTICO
-                }, 800); 
+                logToDB("OK", "Paso 3: ID Cliente OK");
+                setTimeout(() => { step++; updateUIForStep(); }, 250); // AVANCE MÁXIMA VELOCIDAD OCR
             } else {
-                stopCameraOCR(); // Detiene la cámara inmediatamente para que no se trabe
-                retryCount = 4; // Fuerza a que el intento actual cuente como el 5to y active el bloqueo
-                handleStepFailure("ID CLIENTE INCORRECTO", "Lectura OCR incorrecta. Bloqueo de seguridad.");
+                // AHORA SÍ LE DA SUS 5 INTENTOS SIN BLOQUEARSE
+                handleStepFailure("ID CLIENTE INCORRECTO", "Lectura de Cliente incorrecta. Reintentando...");
             }
         }
     }
@@ -916,7 +914,7 @@
                         step = 1; retryCount = 0; jamaita = ""; kanbanParte = ""; idCliente = ""; pendingData = null;
                         document.getElementById('retry-counter').innerText = `Intentos: 0/5`;
                         updateUIForStep();
-                    }, 1500); // FINALIZA Y REINICIA AUTOMÁTICAMENTE
+                    }, 400); // FINALIZA Y REINICIA RAPIDÍSIMO
                 } else {
                     handleStepFailure("ERROR SELECCIÓN TEKIN", "Validación Tekin fallida.");
                 }
@@ -947,9 +945,22 @@
             pop.style.display = 'block';
             setTimeout(() => {
                 pop.style.display = 'none';
+                
+                // Si el error fue en OCR (Paso 3), reiniciamos visual y la cámara vuelve a reproducirse
+                if (step === 3) {
+                    const v = document.getElementById('webcam');
+                    if (v && v.paused) v.play(); // Esto arregla que la cámara se quede trabada
+                    
+                    const ocrLiveRead = document.getElementById('ocr-live-read');
+                    if (ocrLiveRead) {
+                        ocrLiveRead.innerText = "BUSCANDO KANBAN DE CLIENTE...";
+                        ocrLiveRead.classList.remove('ocr-detected');
+                    }
+                }
+                
                 paused = false;
                 if(step === 1 || step === 2) focusHardwareScanner();
-            }, 1400); 
+            }, 1200); // Reduce ligeramente el tiempo de espera por fallo para agilizar el proceso
         }
     }
 
