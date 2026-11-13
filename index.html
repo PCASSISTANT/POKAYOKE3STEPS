@@ -334,7 +334,7 @@
             <h2 id="main-prompt" class="scan-prompt-text">ESPERANDO ESCANEO...</h2>
             <div id="sub-prompt" class="scan-sub-text"></div>
 
-            <!-- Cámara para paso 3 -->
+            <!-- Cámara para paso 3 (Oculta pero lista si se necesita a futuro) -->
             <div id="ocr-viewport">
                 <div id="ocr-live-read" class="ocr-raw-live">BUSCANDO KANBAN DE CLIENTE...</div>
                 <video id="webcam" autoplay playsinline webkit-playsinline muted></video>
@@ -555,10 +555,14 @@
             focusHardwareScanner();
         } else if(step === 3) {
             title.innerText = "PASO 3: ID CLIENTE";
-            mainPrompt.style.display = 'none';
-            subPrompt.style.display = 'none';
-            document.getElementById('btn-manual-trigger').style.display = 'none';
-            startCameraOCR();
+            // Mantenemos la UI como escáner físico
+            mainPrompt.style.display = 'block';
+            subPrompt.style.display = 'block';
+            mainPrompt.innerText = "ESCANEE KANBAN CLIENTE";
+            subPrompt.innerText = "Dispare al código cuadrado (DataMatrix)";
+            document.getElementById('btn-manual-trigger').style.display = 'flex';
+            // Pedimos foco a la Zebra
+            focusHardwareScanner();
         } else if(step === 4) {
             title.innerText = "PASO 4: TEKIN";
             mainPrompt.style.display = 'none';
@@ -574,7 +578,7 @@
     }
 
     // ==========================================
-    // GUARDIÁN DE FOCO AUTOMÁTICO (NUEVO)
+    // GUARDIÁN DE FOCO AUTOMÁTICO
     // Evita que el usuario tenga que tocar la pantalla
     // ==========================================
     setInterval(() => {
@@ -591,8 +595,8 @@
                 }
             }
         } else {
-            // Pantalla de Escaneo (Pasos 1 y 2)
-            if ((step === 1 || step === 2) && !paused) {
+            // Pantalla de Escaneo (Pasos 1, 2 y 3)
+            if ((step === 1 || step === 2 || step === 3) && !paused) {
                 if (!active || (active.id !== 'zebra-wedge-input' && active.id !== 'pin-tl' && active.tagName !== 'BUTTON')) {
                     focusHardwareScanner();
                 }
@@ -601,7 +605,7 @@
     }, 500);
 
     // ==========================================
-    // SECCIÓN MODIFICADA: LECTURA UNIVERSAL TC22
+    // LECTURA UNIVERSAL TC22
     // ==========================================
     const wedgeInput = document.getElementById('zebra-wedge-input');
     
@@ -609,7 +613,7 @@
     function triggerBarcodeProcess(val) {
         val = val.trim();
         wedgeInput.value = ""; // Limpiamos input de inmediato
-        if (val && !paused && (step === 1 || step === 2)) {
+        if (val && !paused && (step === 1 || step === 2 || step === 3)) {
             processFound(val);
         }
     }
@@ -620,7 +624,7 @@
             e.preventDefault();
             const val = wedgeInput.value.trim();
             wedgeInput.value = "";
-            if (val && !paused && (step === 1 || step === 2)) {
+            if (val && !paused && (step === 1 || step === 2 || step === 3)) {
                 processFound(val);
             }
             triggerBarcodeProcess(wedgeInput.value);
@@ -665,7 +669,7 @@
             return;
         }
 
-        if (paused || (step !== 1 && step !== 2) || activeId === 'zebra-wedge-input') return;
+        if (paused || (step !== 1 && step !== 2 && step !== 3) || activeId === 'zebra-wedge-input') return;
 
         if (e.key === 'Enter' || e.keyCode === 13) {
             if (keyBuffer.trim().length > 0) {
@@ -682,13 +686,13 @@
 
     // Recuperar foco al tocar la pantalla (clic o touch)
     document.addEventListener('click', (e) => {
-        if (user && (step === 1 || step === 2) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
+        if (user && (step === 1 || step === 2 || step === 3) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
             focusHardwareScanner();
         }
     });
 
     document.addEventListener('touchstart', (e) => {
-        if (user && (step === 1 || step === 2) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
+        if (user && (step === 1 || step === 2 || step === 3) && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT') {
             focusHardwareScanner();
         }
     });
@@ -749,7 +753,23 @@
         }
         // PASO 3: ID CLIENTE
         else if (step === 3) {
-            idCliente = rawVal.toUpperCase();
+            const rawUpper = rawVal.toUpperCase();
+            
+            // El escáner leerá un texto largo del DataMatrix. Buscamos el ID esperado (ej. M776).
+            let idExtraido = rawUpper;
+            
+            if (expectedIdCliente && rawUpper.includes(expectedIdCliente)) {
+                idExtraido = expectedIdCliente; // Lo encontró dentro de la cadena
+            } else {
+                // Respaldo: intentamos extraer cualquier patrón de 1 Letra + 3 números
+                const match = rawUpper.match(/[MNHW]\d{3}/);
+                if (match) {
+                    idExtraido = match[0];
+                }
+            }
+
+            idCliente = idExtraido;
+
             const validRow = sheetData.find(row => {
                 const cellH = row[7] ? row[7].trim() : '';
                 const cellI = row[8] ? row[8].trim().toUpperCase() : '';
@@ -768,10 +788,10 @@
                 document.getElementById('main-prompt').innerText = `¡CLIENTE OK!`;
                 document.getElementById('sub-prompt').innerText = idCliente;
 
-                logToDB("OK", "Paso 3: ID Cliente OK");
+                logToDB("OK", "Paso 3: ID Cliente OK (Escáner Físico)");
                 setTimeout(() => { step++; updateUIForStep(); }, 250);
             } else {
-                handleStepFailure("ID CLIENTE INCORRECTO", "Lectura de Cliente incorrecta. Reintentando...");
+                handleStepFailure("ID CLIENTE INCORRECTO", "El DataMatrix no contiene el ID esperado. Reintentando...");
             }
         }
     }
@@ -788,7 +808,7 @@
         }).catch(() => {});
     }
 
-    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR
+    // 5. CÁMARA Y AUTO-ENTRENAMIENTO OCR (Mantenidos en código por si se ocupan como respaldo a futuro)
     async function startCameraOCR() {
         document.getElementById('ocr-viewport').style.display = 'block';
         try {
@@ -971,7 +991,7 @@
                 }
                 
                 paused = false;
-                if(step === 1 || step === 2) focusHardwareScanner();
+                if(step === 1 || step === 2 || step === 3) focusHardwareScanner();
             }, 1200); 
         }
     }
